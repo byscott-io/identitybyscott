@@ -7,6 +7,21 @@ Rails.application.routes.draw do
   # build their own forms and post to them.
   devise_for :identities, skip: :all
 
+  # Discovery. Unauthenticated by design -- these documents exist so a verifier
+  # can find the public keys without credentials.
+  get "/.well-known/jwks.json", to: "well_known#jwks", format: false
+  get "/.well-known/openid-configuration", to: "well_known#openid_configuration", format: false
+
+  # Credential endpoints, scoped by client_id in the PATH.
+  #
+  # In the path because a CORS preflight can see nothing else: it carries the
+  # Origin, the method and the names of requested headers, but no body and no
+  # header values. Per-client origin checking therefore has to read the client
+  # from the URL.
+  scope "api/clients/:client_id", module: :api do
+    match "*any", to: "preflight#handle", via: :options
+  end
+
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
