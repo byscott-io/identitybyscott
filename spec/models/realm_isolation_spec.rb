@@ -168,3 +168,43 @@ RSpec.describe "client_id" do
     expect(build(:client, client_id: nil)).not_to be_valid
   end
 end
+
+# Password rules. Explicit rather than via Devise's :validatable, which would
+# add a duplicate email-format validation.
+RSpec.describe "password rules" do
+  it "requires a password on create" do
+    expect(build(:identity, password: nil)).not_to be_valid
+    expect(build(:identity, password: "")).not_to be_valid
+  end
+
+  it "requires at least 12 characters" do
+    expect(build(:identity, password: "a" * 11)).not_to be_valid
+    expect(build(:identity, password: "a" * 12)).to be_valid
+  end
+
+  # bcrypt SILENTLY truncates at 72 bytes. Without this, two different long
+  # passphrases sharing a 72-byte prefix would both unlock the account, and the
+  # person would never be told their password was cut short.
+  it "refuses more than 72 bytes, because bcrypt would truncate" do
+    expect(build(:identity, password: "a" * 72)).to be_valid
+    expect(build(:identity, password: "a" * 73)).not_to be_valid
+  end
+
+  it "counts BYTES, not characters" do
+    # Each of these is 3 bytes in UTF-8, so 25 of them exceed 72 bytes while
+    # being well under 72 characters.
+    expect(build(:identity, password: "日" * 25)).not_to be_valid
+  end
+
+  it "does not demand a password on an unrelated update" do
+    identity = create(:identity)
+
+    expect(identity.update(first_name: "Ada")).to be(true)
+  end
+
+  it "does validate a password that is being changed" do
+    identity = create(:identity)
+
+    expect(identity.update(password: "short")).to be(false)
+  end
+end

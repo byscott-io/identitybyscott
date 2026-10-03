@@ -28,6 +28,16 @@ class IdentityMailer < ApplicationMailer
     mail to: identity.email, subject: "Unlock your account"
   end
 
+  # Sent when someone tries to sign up with an address that already has an
+  # account. The caller is told nothing; the address owner is told what
+  # happened, which is the only party with a legitimate interest.
+  def existing_account(identity)
+    @identity = identity
+    @url = app_url_for(identity, :password_reset, "")
+
+    mail to: identity.email, subject: "Someone tried to create an account with your email"
+  end
+
   private
 
   CONVENTIONAL_PATHS = {

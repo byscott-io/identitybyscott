@@ -18,6 +18,34 @@ class Identity < ApplicationRecord
                     uniqueness: { scope: :realm_id, case_sensitive: false },
                     format: { with: URI::MailTo::EMAIL_REGEXP }
 
+  # Password rules, deliberately explicit rather than via Devise's :validatable,
+  # which would also add a second email-format validation alongside the one
+  # above.
+  #
+  # MINIMUM 12. Longer than the NIST 800-63B floor of 8, because this server
+  # guards whole realms rather than one application, and because length is the
+  # only password rule that reliably helps -- no composition rules, per the same
+  # guidance. Migrated identities keep their existing hashes and are never
+  # revalidated, so this applies to new and reset passwords only.
+  #
+  # MAXIMUM 72 BYTES, and this one is not arbitrary: bcrypt silently truncates
+  # at 72 bytes. Without this, a 100-character passphrase would have its last 28
+  # bytes ignored with nothing to say so, and two different long passphrases
+  # sharing a prefix would both unlock the account.
+  PASSWORD_RANGE = 12..72
+
+  validates :password,
+            length: { minimum: PASSWORD_RANGE.min },
+            if: :password_required?
+
+  # Checked in BYTES, not characters, which Rails' length validator cannot do.
+  # bcrypt truncates at 72 BYTES, so a 25-character passphrase of multi-byte
+  # characters is already over the limit while looking comfortably short -- and
+  # a character-based maximum would pass it straight through to be silently cut.
+  validate :password_within_bcrypt_limit, if: :password_required?
+
+  validates :password, confirmation: true, if: :password_required?
+
   before_validation :normalize_email
 
   # Devise looks an identity up by its authentication_keys GLOBALLY. That is
@@ -109,6 +137,23 @@ class Identity < ApplicationRecord
   end
 
   private
+
+  # Required on create, and on any change. Not on an unrelated update, which
+  # would make every profile edit demand a password.
+  def password_required?
+    return true if new_record?
+
+    password.present? || password_confirmation.present?
+  end
+
+  def password_within_bcrypt_limit
+    return if password.blank?
+    return if password.bytesize <= PASSWORD_RANGE.max
+
+    errors.add(:password,
+               "is too long (maximum #{PASSWORD_RANGE.max} bytes; " \
+               "#{password.bytesize} given). bcrypt ignores anything beyond that.")
+  end
 
   def normalize_email
     self.email = email.to_s.downcase.strip if email.present?

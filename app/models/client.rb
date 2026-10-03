@@ -65,23 +65,10 @@ class Client < ApplicationRecord
     split_list(allowed_origins)
   end
 
-  def redirect_uris_list
-    split_list(redirect_uris)
-  end
-
   def origin_allowed?(origin)
     return false if origin.blank?
 
     allowed_origins_list.include?(origin)
-  end
-
-  # Exact match only. No wildcards and no prefix matching: a prefix match on a
-  # redirect_uri is the classic way authorization codes get handed to an
-  # attacker.
-  def redirect_uri_allowed?(uri)
-    return false if uri.blank?
-
-    redirect_uris_list.include?(uri)
   end
 
   private

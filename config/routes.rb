@@ -25,6 +25,7 @@ Rails.application.routes.draw do
     match "*any", to: "preflight#handle", via: :options
 
     post "auth/sign_in", to: "sessions#create"
+    post "auth/sign_up", to: "registrations#create"
     post "auth/verify_mfa", to: "mfa#verify"
     post "auth/forgot_password", to: "passwords#create"
     post "auth/reset_password", to: "passwords#update"
