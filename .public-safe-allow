@@ -1,0 +1,20 @@
+# Deliberate exceptions to bin/check-public-safe. One regexp per line, each with
+# a reason. Adding a line here is a decision someone can review; bypassing the
+# check with --no-verify is not.
+
+# Rails' own generated comments and config reference 127.0.0.1 / 0.0.0.0, which
+# are not host addresses of ours.
+^.*(?:127\.0\.0\.1|0\.0\.0\.0).*$
+
+# Documentation examples use example.com deliberately.
+example\.com
+
+# Rails' generated database.yml comments carry placeholder connection URLs
+# (myuser:mypass, cacheuser:cachepass). Matched narrowly rather than by
+# excluding comments, because a real secret in a comment is still a leak.
+(?:myuser:mypass|cacheuser:cachepass)@localhost
+
+# The CI postgres service, whose credentials are postgres/postgres on localhost
+# inside a throwaway container. Matched narrowly rather than excluding the
+# workflow, which is exactly where a real secret would be most dangerous.
+postgres://postgres:postgres@localhost

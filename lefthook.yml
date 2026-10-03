@@ -1,0 +1,17 @@
+pre-commit:
+  parallel: false
+  commands:
+    public-safe:
+      # FIRST, and on its own: this repository is public, so a secret or a piece
+      # of fleet detail must be refused before anything else is even considered.
+      run: bin/with-ruby ruby bin/check-public-safe --staged
+    rubocop:
+      glob: "*.rb"
+      run: bin/with-ruby bundle exec rubocop --force-exclusion {staged_files}
+
+pre-push:
+  commands:
+    public-safe:
+      run: bin/with-ruby ruby bin/check-public-safe --all
+    rspec:
+      run: bin/with-ruby bundle exec rspec

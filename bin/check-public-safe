@@ -1,0 +1,128 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Refuses content that must never appear in a PUBLIC repository.
+#
+# Two things are being prevented, and they are different:
+#
+#   secrets      a credential that would be live the moment it is published
+#   fleet detail hostnames, IP addresses, SSH users, key filenames, account
+#                names -- reconnaissance rather than credentials, but the rule
+#                for this repository is that none of it appears, ever
+#
+# Run modes:
+#   --staged    what is about to be committed (the pre-commit hook)
+#   --all       every tracked file (CI, which a --no-verify cannot bypass)
+#   --history   every commit ever made (occasional audit; history is published too)
+#
+# A deliberate exception goes in .public-safe-allow, one regexp per line, with a
+# comment saying why. Adding one is a decision; bypassing the check is not.
+
+require "open3"
+
+PATTERNS = {
+  # Secrets -- live the moment they are published.
+  "private key block" => /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  "GitHub token" => /\bgh[pousr]_[A-Za-z0-9]{16,}/,
+  "AWS access key id" => /\bAKIA[0-9A-Z]{16}\b/,
+  "Rails master key" => /^[a-f0-9]{32}$/,
+  "basic-auth URL" => %r{://[^/\s:@]+:[^/\s@]+@},
+
+  # Fleet detail -- no credential, but not ours to publish.
+  "host IP address" => /\b(?:\d{1,3}\.){3}\d{1,3}\b/,
+  "infra repo name" => /infrabyscott/i,
+  "PRIMARY_HOST" => /PRIMARY_HOST/,
+  "deploy SSH user" => /\bubuntu@/,
+  "registry account" => /\bsevgibson\b/i,
+  "internal domain" => /\bbyscott\.io\b/i,
+  "SSH key filename" => /[\w-]+-key\.pem/
+}.freeze
+
+ALLOW_FILE = ".public-safe-allow"
+SKIP_PATHS = %r{\A(?:\.public-safe-allow|bin/check-public-safe|Gemfile\.lock|yarn\.lock|package-lock\.json)\z}
+
+def allowed
+  return [] unless File.exist?(ALLOW_FILE)
+
+  File.readlines(ALLOW_FILE, chomp: true)
+      .reject { |line| line.strip.empty? || line.strip.start_with?("#") }
+      .map { |line| Regexp.new(line) }
+end
+
+def scan(label, text, findings, allow)
+  text.each_line.with_index(1) do |line, number|
+    next if allow.any? { |rule| rule.match?(line) }
+
+    PATTERNS.each do |name, pattern|
+      next unless pattern.match?(line)
+
+      findings << "  #{label}:#{number}  #{name}"
+    end
+  end
+end
+
+# Tracked files AND untracked-but-not-ignored ones.
+#
+# git ls-files alone covers only tracked files, which made an earlier version of
+# this script report "clean" while a planted secret sat in a new, unstaged file.
+# A check that is quiet about the very moment you most want it to speak is worse
+# than no check.
+def scannable_files
+  `git ls-files -z --cached --others --exclude-standard`
+    .split("\0")
+    .uniq
+    .reject { |path| SKIP_PATHS.match?(path) }
+end
+
+mode = ARGV[0] || "--staged"
+allow = allowed
+findings = []
+
+case mode
+when "--staged"
+  changed = `git diff --cached --name-only --diff-filter=ACM -z`.split("\0")
+  changed.reject { |path| SKIP_PATHS.match?(path) }.each do |path|
+    content, = Open3.capture2("git", "show", ":#{path}")
+    scan(path, content, findings, allow)
+  end
+when "--all"
+  scannable_files.each do |path|
+    next unless File.file?(path)
+
+    scan(path, File.read(path, encoding: "UTF-8", invalid: :replace), findings, allow)
+  end
+when "--history"
+  # Walks the diff hunk by hunk so the same path skips apply as elsewhere.
+  # Without that, four-part gem versions in Gemfile.lock -- 3.17.0.6, 3.3.12.0 --
+  # match the IP-address pattern exactly and bury real findings in noise.
+  `git rev-list --all`.split("\n").each do |revision|
+    diff, = Open3.capture2("git", "show", "--format=", "--unified=0", revision)
+    current_path = nil
+    skipping = false
+
+    diff.each_line do |line|
+      if (match = line.match(%r{\Adiff --git a/.* b/(.*)\n?\z}))
+        current_path = match[1]
+        skipping = SKIP_PATHS.match?(current_path)
+        next
+      end
+      next if skipping || current_path.nil?
+      next unless line.start_with?("+")
+
+      scan("#{revision[0, 10]} #{current_path}", line, findings, allow)
+    end
+  end
+else
+  abort "usage: #{$PROGRAM_NAME} [--staged|--all|--history]"
+end
+
+if findings.empty?
+  puts "public-safe: clean (#{mode})"
+  exit 0
+end
+
+warn "public-safe: REFUSED -- this repository is public.\n"
+warn findings.uniq.join("\n")
+warn "\nIf a match is deliberate, add a regexp with a reason to #{ALLOW_FILE}."
+warn "Do not bypass this check; CI runs --all and cannot be bypassed."
+exit 1

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Run a command under the Ruby this repo pins in .ruby-version.
+#
+# Git hooks run non-interactively, so chruby-auto never fires and `bundle`
+# resolves to whatever Ruby happens to be first on PATH. That then dies with
+# Bundler::RubyVersionMismatch against the Gemfile's pin, which reads like a
+# broken hook rather than a wrong interpreter. Activating explicitly fixes it.
+#
+# A no-op where chruby is not installed (CI, containers), so the command still
+# runs there and this stays safe to call from anywhere.
+set -e
+
+if [ -f /usr/local/share/chruby/chruby.sh ]; then
+  # shellcheck disable=SC1091
+  . /usr/local/share/chruby/chruby.sh
+  if [ -f .ruby-version ]; then
+    chruby "$(cat .ruby-version)"
+  fi
+fi
+
+exec "$@"
