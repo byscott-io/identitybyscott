@@ -57,7 +57,7 @@ gem "rqrcode", ">= 2.0"
 
 # json 3.0 broke ActiveSupport::JSON.decode; pinned fleet-wide until Rails
 # ships the fix.
-gem "json", "< 3"
+gem "json", "< 4"
 
 group :development, :test do
   gem "rspec-rails", "~> 8.0"
