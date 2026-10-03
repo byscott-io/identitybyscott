@@ -29,6 +29,13 @@ Rails.application.routes.draw do
     post "auth/verify_mfa", to: "mfa#verify"
     post "auth/forgot_password", to: "passwords#create"
     post "auth/reset_password", to: "passwords#update"
+    delete "auth/sign_out", to: "sessions#destroy"
+
+    get "auth/mfa", to: "mfa_enrollment#show"
+    post "auth/mfa/setup", to: "mfa_enrollment#setup"
+    post "auth/mfa/enable", to: "mfa_enrollment#enable"
+    post "auth/mfa/disable", to: "mfa_enrollment#disable"
+    post "auth/mfa/regenerate_backup_codes", to: "mfa_enrollment#regenerate_backup_codes"
   end
 
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html

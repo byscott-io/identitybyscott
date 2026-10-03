@@ -39,6 +39,19 @@ module Api
       render_signed_in(identity)
     end
 
+    # Nothing to revoke yet, and saying so plainly beats a comforting no-op.
+    #
+    # Access tokens are stateless with a 15 minute life and this server holds no
+    # session records, so there is nothing here to invalidate -- the client
+    # discards its token and the old one simply expires. 204 reflects that
+    # honestly rather than implying a revocation happened.
+    #
+    # This becomes real with refresh tokens and session rows, at which point it
+    # revokes the session and every access token minted from it.
+    def destroy
+      head :no_content
+    end
+
     private
 
     def render_signed_in(identity)
