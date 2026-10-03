@@ -1,0 +1,69 @@
+# Deployment configuration.
+#
+# Written ENV-FIRST because this repository is public. Everything that would
+# otherwise name infrastructure -- the host, the deploy user, the SSH key, the
+# registry account -- is read from the environment at deploy time, and every
+# application setting is an env.secret NAME rather than a value.
+#
+# The variable names are this repository's OWN, deliberately: DEPLOY_HOST rather
+# than borrowing the name private infrastructure uses for the same thing. That
+# costs one extra repository secret and keeps the public repository free of
+# another system's vocabulary.
+#
+# bin/check-public-safe refuses the alternative, so this is enforced rather than
+# remembered.
+service: identitybyscott
+image: <%= ENV["DEPLOY_REGISTRY_ACCOUNT"] %>/identitybyscott
+retain_containers: 2
+
+servers:
+  web:
+    hosts:
+      - <%= ENV["DEPLOY_HOST"] %>
+
+# Migrations run at container boot, and a CONCURRENTLY index build has blown the
+# 30 second default elsewhere in this fleet. A ROOT key -- not under proxy:,
+# where it errors as an unknown key.
+deploy_timeout: 300
+
+proxy:
+  hosts:
+    - <%= ENV["IDENTITY_HOST"] %>
+  ssl: true
+  app_port: 3000
+  healthcheck:
+    path: /up
+    interval: 20
+    timeout: 60
+
+registry:
+  server: ghcr.io
+  username:
+    - DEPLOY_REGISTRY_ACCOUNT
+  password:
+    - GITHUB_TOKEN
+
+builder:
+  arch: amd64
+  secrets:
+    - GITHUB_TOKEN
+
+ssh:
+  user: <%= ENV["DEPLOY_SSH_USER"] %>
+  keys:
+    - <%= ENV["DEPLOY_SSH_KEY"] %>
+
+env:
+  clear:
+    RAILS_ENV: production
+    RAILS_LOG_TO_STDOUT: "enabled"
+    SOLID_QUEUE_IN_PUMA: "true"
+  # NAMES only. Values come from .kamal/secrets at deploy time and are never in
+  # this file.
+  secret:
+    - RAILS_MASTER_KEY
+    - DATABASE_URL
+    - GITHUB_TOKEN
+    - IDENTITY_SIGNING_KEY
+    - IDENTITY_ISSUER
+    - MAILER_SENDER

@@ -144,6 +144,38 @@ RSpec.describe "architectural rules" do
     end
   end
 
+  describe "the deploy configuration names no infrastructure" do
+    # The file most likely to acquire a hostname during a hurried fix, in the
+    # one repository where that cannot happen.
+    it "reads the host, user, key and registry from the environment" do
+      kamal = File.read(".kamal/deploy.yml")
+
+      expect(kamal).to include('ENV["DEPLOY_HOST"]')
+      expect(kamal).to include('ENV["DEPLOY_SSH_USER"]')
+      expect(kamal).to include('ENV["DEPLOY_SSH_KEY"]')
+      expect(kamal).to match(/DEPLOY_REGISTRY_ACCOUNT/)
+    end
+
+    it "lists application settings as secret NAMES, not values" do
+      kamal = YAML.safe_load(ERB.new(File.read(".kamal/deploy.yml")).result, aliases: true)
+
+      expect(kamal.dig("env", "secret")).to include("IDENTITY_SIGNING_KEY", "DATABASE_URL")
+      expect(kamal.dig("env", "clear").keys).not_to include("IDENTITY_SIGNING_KEY")
+    end
+
+    # Deploys serialise fleet-wide through this group. An application that
+    # deployed outside it would race the host's container store.
+    it "joins the shared deploy concurrency group" do
+      expect(File.read(".github/workflows/deploy.yml")).to include("group: deploy-byscott-host")
+    end
+
+    it "is dispatch-only, so nothing deploys on a push" do
+      workflow = YAML.safe_load(File.read(".github/workflows/deploy.yml"))
+
+      expect(workflow[true] || workflow["on"]).to eq("workflow_dispatch" => nil)
+    end
+  end
+
   describe "the public-safety gate is wired" do
     it "runs on pre-commit, on the commit message, and on pre-push" do
       lefthook = File.read("lefthook.yml")

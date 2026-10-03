@@ -1,0 +1,60 @@
+# workflow_dispatch only, and dispatched by the fleet's deploy tooling rather
+# than run by hand. Shares the concurrency group every other application uses,
+# which is what serialises deploys across the fleet -- concurrent image pulls
+# otherwise race the host's containerd content store.
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-byscott-host
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      # Read from secrets, not written here: this repository is public, so the
+      # host, the deploy user, the SSH key filename and the registry account
+      # are all configuration rather than content.
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      IDENTITY_HOST: ${{ secrets.IDENTITY_HOST }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_REGISTRY_ACCOUNT: ${{ secrets.DEPLOY_REGISTRY_ACCOUNT }}
+      GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+
+      - name: Write the deploy key
+        run: |
+          mkdir -p ~/.ssh
+          # A filename that reveals nothing. The usual one elsewhere names a
+          # private repository, which is exactly the kind of detail this
+          # repository must not carry -- and bin/check-public-safe refuses it,
+          # which is how this was caught rather than shipped.
+          echo "${{ secrets.KAMAL_SSH_PRIVATE_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          echo "DEPLOY_SSH_KEY=~/.ssh/id_deploy" >> "$GITHUB_ENV"
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Write .kamal/secrets
+        run: |
+          mkdir -p .kamal
+          {
+            echo "RAILS_MASTER_KEY=${{ secrets.RAILS_MASTER_KEY }}"
+            echo "DATABASE_URL=${{ secrets.DATABASE_URL }}"
+            echo "GITHUB_TOKEN=${{ secrets.GH_TOKEN }}"
+            echo "IDENTITY_SIGNING_KEY=${{ secrets.IDENTITY_SIGNING_KEY }}"
+            echo "IDENTITY_ISSUER=${{ secrets.IDENTITY_ISSUER }}"
+            echo "MAILER_SENDER=${{ secrets.MAILER_SENDER }}"
+            echo "DEPLOY_REGISTRY_ACCOUNT=${{ secrets.DEPLOY_REGISTRY_ACCOUNT }}"
+          } > .kamal/secrets
+
+      - name: Deploy
+        run: bundle exec kamal deploy
