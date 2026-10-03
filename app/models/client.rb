@@ -2,6 +2,22 @@
 
 # A registered application, and the record that makes realm isolation real:
 # every request's realm is resolved from its client_id.
+#
+# Two identifiers, and they must not be confused:
+#
+#   id         a uuid primary key. INTERNAL. Only ever a foreign key target
+#              (identities.signup_client_id). Never published, never in a URL,
+#              never in a token.
+#   client_id  the public KEY -- a stable readable name like "churchcare".
+#              Appears in URLs, in the aud claim of every token, and in each
+#              application's own configuration.
+#
+# client_id is a poor name for what it is: semantically it is a key, not an id,
+# and this class having a real `id` beside it makes that worse. The name stays
+# because it is not ours to choose -- RFC 6749 section 2.2 defines it, every
+# OIDC library expects it, the discovery document publishes it, and aud is
+# matched against it. Being tidier here would mean being non-standard at the one
+# boundary where standards earn their keep.
 class Client < ApplicationRecord
   belongs_to :realm
 
