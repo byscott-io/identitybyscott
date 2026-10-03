@@ -7,12 +7,35 @@ class Client < ApplicationRecord
 
   has_secure_password :client_secret, validations: false
 
+  # A readable public identifier rather than a random string.
+  #
+  # client_id is public by design -- it ships in every application's JS bundle
+  # and appears as the aud claim in every token -- so randomising it hides
+  # nothing. A readable one makes URLs and tokens legible:
+  #
+  #   POST /api/apps/churchcare/auth/sign_in       aud: "churchcare"
+  #   POST /api/apps/cid_x7KqL9.../auth/sign_in    aud: "cid_x7KqL9..."
+  #
+  # One identifier, not two. A separate "slug for URLs, client_id for tokens"
+  # would be two names for the same thing and an invitation to confuse them.
+  RESERVED_CLIENT_IDS = %w[
+    api apps clients admin auth health up new edit index .well-known
+  ].freeze
+
   validates :name, presence: true, uniqueness: { scope: :realm_id }
-  validates :client_id, presence: true, uniqueness: true
+  validates :client_id,
+            presence: true,
+            uniqueness: true,
+            format: {
+              with: /\A[a-z0-9][a-z0-9-]{1,62}[a-z0-9]\z/,
+              message: "must be 3-64 lowercase letters, digits or hyphens"
+            },
+            exclusion: {
+              in: RESERVED_CLIENT_IDS,
+              message: "is reserved"
+            }
 
   scope :active, -> { where(active: true) }
-
-  before_validation :generate_client_id, on: :create
 
   # Origins permitted to post credentials from a browser. This is the
   # browser-facing security boundary: a browser presents only the public
@@ -49,9 +72,5 @@ class Client < ApplicationRecord
 
   def split_list(value)
     value.to_s.split(/[\s,]+/).compact_blank
-  end
-
-  def generate_client_id
-    self.client_id ||= "cid_#{SecureRandom.urlsafe_base64(24)}"
   end
 end

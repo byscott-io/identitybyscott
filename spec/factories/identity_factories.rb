@@ -9,6 +9,7 @@ FactoryBot.define do
   factory :client do
     realm
     sequence(:name) { |n| "App #{n}" }
+    sequence(:client_id) { |n| "test-app-#{n}" }
     allowed_origins { "https://app.example.com" }
     app_base_url { "https://app.example.com" }
   end

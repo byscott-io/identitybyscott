@@ -12,7 +12,7 @@ module Api
     ALLOWED_HEADERS = "Content-Type, Authorization"
 
     def handle
-      client = Client.active.find_by(client_id: params[:client_id])
+      client = Client.active.find_by(client_id: request.path_parameters[:client_id])
       origin = request.headers["Origin"]
 
       # A refused preflight stops the real request being SENT, not merely hides

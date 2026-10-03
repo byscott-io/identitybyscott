@@ -11,7 +11,7 @@ RSpec.describe "CORS preflight" do
   end
 
   def preflight(client_id, origin, path: "auth/sign_in")
-    process :options, "/api/clients/#{client_id}/#{path}",
+    process :options, "/api/apps/#{client_id}/#{path}",
             headers: { "Origin" => origin, "Access-Control-Request-Method" => "POST" }
   end
 

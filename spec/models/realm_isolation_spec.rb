@@ -129,3 +129,42 @@ RSpec.describe "realm isolation" do
     end
   end
 end
+
+# The public identifier. Readable rather than random, because it is public
+# either way -- it ships in every application's JS bundle and is the aud claim
+# in every token.
+RSpec.describe "client_id" do
+  it "accepts a readable slug" do
+    expect(build(:client, client_id: "churchcare")).to be_valid
+  end
+
+  it "is unique across realms, not just within one" do
+    create(:client, client_id: "churchcare")
+    other_realm_client = build(:client, client_id: "churchcare")
+
+    expect(other_realm_client).not_to be_valid
+  end
+
+  it "refuses characters that would need escaping in a URL" do
+    %w[Church_Care church.care church/care church\ care].each do |bad|
+      expect(build(:client, client_id: bad)).not_to be_valid
+    end
+  end
+
+  it "refuses something too short to be meaningful" do
+    expect(build(:client, client_id: "a")).not_to be_valid
+  end
+
+  # The path segment keeps a client_id from colliding with a top-level API
+  # route, but reserving the obvious words as well costs nothing and removes a
+  # class of confusing bug.
+  it "refuses a reserved word" do
+    %w[api apps auth admin health].each do |reserved|
+      expect(build(:client, client_id: reserved)).not_to be_valid
+    end
+  end
+
+  it "is required -- nothing is generated silently" do
+    expect(build(:client, client_id: nil)).not_to be_valid
+  end
+end

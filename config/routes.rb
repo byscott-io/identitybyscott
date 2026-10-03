@@ -18,7 +18,10 @@ Rails.application.routes.draw do
   # Origin, the method and the names of requested headers, but no body and no
   # header values. Per-client origin checking therefore has to read the client
   # from the URL.
-  scope "api/clients/:client_id", module: :api do
+  # "apps" rather than "clients", and a readable client_id rather than a random
+  # one -- the identifier is public either way, so legibility is free. The
+  # segment is kept so a client_id can never collide with a top-level API path.
+  scope "api/apps/:client_id", module: :api do
     match "*any", to: "preflight#handle", via: :options
 
     post "auth/sign_in", to: "sessions#create"

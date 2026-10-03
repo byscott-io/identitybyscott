@@ -21,7 +21,7 @@ module Api
     # realm=church, any application could claim any realm and the isolation the
     # whole design rests on would be decorative.
     def resolve_client!
-      Current.client = Client.active.find_by(client_id: params[:client_id])
+      Current.client = Client.active.find_by(client_id: path_client_id)
 
       return if Current.client
 
@@ -33,6 +33,17 @@ module Api
 
     def realm
       Current.client.realm
+    end
+
+    # From the PATH explicitly, not from params.
+    #
+    # params merges path, query string and body. Rails does give path segments
+    # precedence, so params[:client_id] happens to be correct today -- verified
+    # -- but resting a security property on an implicit merge order is fragile.
+    # Reading the path directly means a body or query parameter can never name
+    # a different client than the one whose Origin the preflight approved.
+    def path_client_id
+      request.path_parameters[:client_id]
     end
 
     # The browser-facing security boundary. A browser holds no secret, so a

@@ -26,7 +26,7 @@ RSpec.describe "POST auth/sign_in" do
   end
 
   def sign_in(email: "ada@example.com", pass: nil, client_id: nil, origin: "https://app.example.com")
-    post "/api/clients/#{client_id || client.client_id}/auth/sign_in",
+    post "/api/apps/#{client_id || client.client_id}/auth/sign_in",
          params: { email: email, password: pass || password },
          headers: { "Origin" => origin }
   end
@@ -187,7 +187,7 @@ RSpec.describe "POST auth/sign_in" do
     end
 
     it "allows a non-browser caller, which sends no Origin" do
-      post "/api/clients/#{client.client_id}/auth/sign_in",
+      post "/api/apps/#{client.client_id}/auth/sign_in",
            params: { email: "ada@example.com", password: password }
 
       expect(response).to have_http_status(:ok)
