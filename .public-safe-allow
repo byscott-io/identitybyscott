@@ -18,3 +18,8 @@ example\.com
 # inside a throwaway container. Matched narrowly rather than excluding the
 # workflow, which is exactly where a real secret would be most dangerous.
 postgres://postgres:postgres@localhost
+
+# A commit message explaining the four-part-gem-version false positive quotes
+# the versions that caused it. Allowlisted as literals rather than by relaxing
+# the IP pattern, so an actual address in a message is still refused.
+\b(?:3\.17\.0\.6|3\.3\.12\.0)\b

@@ -38,6 +38,16 @@ PATTERNS = {
   "SSH key filename" => /[\w-]+-key\.pem/
 }.freeze
 
+# Commit messages are published too, and are scanned for VALUES rather than
+# words. A message may legitimately discuss PRIMARY_HOST or say "private key
+# block" -- this file's own history does -- but it must never contain an actual
+# address, key or token. Narrowing the patterns here avoids absurd allowlisting
+# while still catching the thing that matters.
+MESSAGE_PATTERNS = PATTERNS.slice(
+  "private key block", "GitHub token", "AWS access key id",
+  "Rails master key", "basic-auth URL", "host IP address"
+).freeze
+
 ALLOW_FILE = ".public-safe-allow"
 SKIP_PATHS = %r{\A(?:\.public-safe-allow|bin/check-public-safe|Gemfile\.lock|yarn\.lock|package-lock\.json)\z}
 
@@ -49,11 +59,11 @@ def allowed
       .map { |line| Regexp.new(line) }
 end
 
-def scan(label, text, findings, allow)
+def scan(label, text, findings, allow, patterns = PATTERNS)
   text.each_line.with_index(1) do |line, number|
     next if allow.any? { |rule| rule.match?(line) }
 
-    PATTERNS.each do |name, pattern|
+    patterns.each do |name, pattern|
       next unless pattern.match?(line)
 
       findings << "  #{label}:#{number}  #{name}"
@@ -96,6 +106,9 @@ when "--history"
   # Without that, four-part gem versions in Gemfile.lock -- 3.17.0.6, 3.3.12.0 --
   # match the IP-address pattern exactly and bury real findings in noise.
   `git rev-list --all`.split("\n").each do |revision|
+    message, = Open3.capture2("git", "log", "-1", "--format=%B", revision)
+    scan("#{revision[0, 10]} (commit message)", message, findings, allow, MESSAGE_PATTERNS)
+
     diff, = Open3.capture2("git", "show", "--format=", "--unified=0", revision)
     current_path = nil
     skipping = false
@@ -112,8 +125,11 @@ when "--history"
       scan("#{revision[0, 10]} #{current_path}", line, findings, allow)
     end
   end
+when "--message"
+  path = ARGV[1] or abort "usage: #{$PROGRAM_NAME} --message <file>"
+  scan("commit message", File.read(path), findings, allow, MESSAGE_PATTERNS)
 else
-  abort "usage: #{$PROGRAM_NAME} [--staged|--all|--history]"
+  abort "usage: #{$PROGRAM_NAME} [--staged|--all|--history|--message <file>]"
 end
 
 if findings.empty?

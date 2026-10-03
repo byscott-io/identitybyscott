@@ -9,6 +9,14 @@ pre-commit:
       glob: "*.rb"
       run: bin/with-ruby bundle exec rubocop --force-exclusion {staged_files}
 
+commit-msg:
+  commands:
+    public-safe:
+      # Commit messages are published as surely as the code is. A message may
+      # discuss these patterns by name, but must not contain an actual address,
+      # key or token.
+      run: bin/with-ruby ruby bin/check-public-safe --message {1}
+
 pre-push:
   commands:
     public-safe:
