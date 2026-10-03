@@ -194,3 +194,51 @@ RSpec.describe "POST auth/sign_in" do
     end
   end
 end
+
+# The realm claim: stated by this server so an application can CHECK its own
+# registration rather than assume it. Never an input -- an application that
+# could name a realm could claim any realm.
+RSpec.describe "the realm claim" do
+  let(:signing_key) { OpenSSL::PKey::RSA.generate(2048) }
+  let(:realm) { create(:realm, key: "church", require_email_confirmation: false) }
+  let(:client) { create(:client, realm: realm, allowed_origins: "https://app.example.com") }
+  let(:password) { "correct horse battery staple" }
+  let!(:identity) do
+    create(:identity, realm: realm, signup_client: client,
+                      email: "ada@example.com", password: password, confirmed_at: Time.current)
+  end
+
+  around do |example|
+    ENV["IDENTITY_SIGNING_KEY"] = signing_key.to_pem
+    ENV["IDENTITY_ISSUER"] = "https://identity.test"
+    SigningKeys.reset!
+    example.run
+  ensure
+    ENV.delete("IDENTITY_SIGNING_KEY")
+    ENV.delete("IDENTITY_ISSUER")
+    SigningKeys.reset!
+  end
+
+  def claims
+    post "/api/apps/#{client.client_id}/auth/sign_in",
+         params: { email: "ada@example.com", password: password },
+         headers: { "Origin" => "https://app.example.com" }
+    JWT.decode(response.parsed_body["access_token"], signing_key.public_key, false).first
+  end
+
+  it "states the realm the identity belongs to" do
+    expect(claims["realm"]).to eq("church")
+  end
+
+  it "comes from the client's registration, not from the request" do
+    # The request named only a client_id. The realm in the token is this
+    # server's fact about that client.
+    expect(claims["realm"]).to eq(client.realm.key)
+  end
+
+  it "still carries no claim about containers or roles" do
+    # This server has no memberships table, so a container claim would be a
+    # guess -- and a guessed container is a cross-tenant leak, not an error.
+    expect(claims.keys).not_to include("cid", "container_id", "roles", "role")
+  end
+end

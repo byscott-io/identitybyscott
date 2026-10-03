@@ -41,7 +41,23 @@ class TokenIssuer
       aud: @client.client_id,
       iat: now.to_i,
       exp: (now + ACCESS_TOKEN_TTL).to_i,
-      jti: SecureRandom.uuid
+      jti: SecureRandom.uuid,
+
+      # The realm this identity belongs to, stated by THIS server.
+      #
+      # Informational and defensive, never an authorization input. An
+      # application already knows its own realm from its registration, so this
+      # exists so it can CHECK rather than assume -- storing realm on its own
+      # user row and refusing a token whose realm claim disagrees.
+      #
+      # The failure that catches is real and otherwise silent: a client
+      # registered in the wrong realm would have identities from that realm
+      # provision into the application, cross-tenant, with nothing to show it.
+      #
+      # Note this is not the application telling us a realm -- that direction is
+      # forbidden, because an application that could name a realm could claim
+      # any realm. It is the reverse: we tell the application, and it may verify.
+      realm: @client.realm.key
     }
 
     PROFILE_CLAIMS.each do |claim, attribute|
