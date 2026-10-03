@@ -67,6 +67,43 @@ class Identity < ApplicationRecord
     IdentityMailer.public_send(notification, self, *args).deliver_later
   end
 
+  # --- MFA (TOTP) -------------------------------------------------------------
+
+  # Verified with a drift window, because phone clocks are not accurate and a
+  # code rejected for being a few seconds old is indistinguishable, to the
+  # person typing it, from a broken feature.
+  TOTP_DRIFT = 30
+
+  def verify_totp(code)
+    return false if mfa_secret.blank? || code.blank?
+
+    ROTP::TOTP.new(mfa_secret, issuer: "identitybyscott")
+              .verify(code.to_s.gsub(/\s/, ""), drift_behind: TOTP_DRIFT, drift_ahead: TOTP_DRIFT)
+              .present?
+  end
+
+  # Backup codes are stored as digests, never in the clear. A stolen database
+  # dump must not yield usable second factors.
+  def backup_code_digests
+    JSON.parse(backup_codes.presence || "[]")
+  rescue JSON::ParserError
+    []
+  end
+
+  # Consumed on use. A reusable backup code is a permanent second factor that
+  # cannot be revoked without regenerating the whole set.
+  def consume_backup_code!(code)
+    normalized = code.to_s.strip.downcase
+    return false if normalized.blank?
+
+    digest = Digest::SHA256.hexdigest(normalized)
+    remaining = backup_code_digests
+    return false unless remaining.delete(digest)
+
+    update_columns(backup_codes: remaining.to_json) # rubocop:disable Rails/SkipsModelValidations
+    true
+  end
+
   def full_name
     [ first_name, last_name ].compact_blank.join(" ").presence
   end
