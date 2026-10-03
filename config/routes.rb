@@ -20,6 +20,8 @@ Rails.application.routes.draw do
   # from the URL.
   scope "api/clients/:client_id", module: :api do
     match "*any", to: "preflight#handle", via: :options
+
+    post "auth/sign_in", to: "sessions#create"
   end
 
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
