@@ -224,17 +224,40 @@ RSpec.describe "architectural rules" do
                            "these run on input an outsider controls: #{offenders}"
     end
 
-    it "keeps secrets out of every workflow that an outsider can trigger" do
+    # NARROWED, deliberately, after it blocked adding the PR review to this
+    # repository -- the one holding every password in the fleet, and the only
+    # one that had no code review at all.
+    #
+    # The old rule said a pull_request workflow may reference NO secrets. That
+    # is stricter than the threat. GitHub does not pass secrets to a fork's
+    # pull_request run, so a secret there is reachable only by someone who
+    # already has write access. The ban above -- pull_request_target,
+    # issue_comment, workflow_run, issues -- is what actually protects
+    # anything, because those run in the BASE repository's context on input an
+    # outsider controls.
+    #
+    # So a secret may reach a pull_request workflow, but ONLY by being handed to
+    # a reusable workflow through `secrets:`. A `run:` block is arbitrary code,
+    # and a secret reaching one on a pull-request trigger is the shape that
+    # leaks: this repository's run logs are world-readable, masking is
+    # exact-match only, and a transformed value slips straight through.
+    it "allows secrets into a pull_request workflow only via a reusable workflow" do
       offenders = workflows.select do |path|
-        content = File.read(path)
-        triggers = YAML.safe_load(content).then { |y| y[true] || y["on"] }
+        parsed = YAML.safe_load(File.read(path), aliases: true)
+        triggers = parsed[true] || parsed["on"]
         keys = triggers.is_a?(Hash) ? triggers.keys.map(&:to_s) : Array(triggers).map(&:to_s)
+        next false unless keys.include?("pull_request")
 
-        keys.include?("pull_request") && content.match?(/secrets\./)
+        parsed.fetch("jobs", {}).values.any? do |job|
+          job["steps"].to_a.any? do |step|
+            [ step["run"].to_s, step["env"].to_h.values.join(" ") ].any? { |v| v.include?("secrets.") }
+          end
+        end
       end
 
       expect(offenders).to be_empty,
-                           "a pull_request workflow must reference no secrets: #{offenders}"
+                           "a pull_request workflow may pass secrets to a reusable workflow, but " \
+                           "must not put one in a step's run or env: #{offenders}"
     end
 
     it "never interpolates a secret directly into a run block" do
