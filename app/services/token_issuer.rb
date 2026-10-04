@@ -22,10 +22,11 @@ class TokenIssuer
     zoneinfo: :time_zone
   }.freeze
 
-  def initialize(identity:, client:, issuer: nil)
+  def initialize(identity:, client:, issuer: nil, session: nil)
     @identity = identity
     @client = client
     @issuer = issuer || ENV.fetch("IDENTITY_ISSUER")
+    @session = session
   end
 
   def access_token
@@ -59,6 +60,14 @@ class TokenIssuer
       # any realm. It is the reverse: we tell the application, and it may verify.
       realm: @client.realm.key
     }
+
+    # sid ties this token to the session it was minted from, so sign_out can
+    # revoke THAT session rather than guessing, and a future revocation
+    # deny-list has something to key on. An OIDC-standard claim name.
+    #
+    # Optional: a token minted without a session -- an MFA challenge, or a test
+    # helper -- simply has no sid, and nothing may assume one is present.
+    claims[:sid] = @session.id if @session
 
     PROFILE_CLAIMS.each do |claim, attribute|
       value = @identity.public_send(attribute)

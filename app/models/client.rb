@@ -20,6 +20,7 @@
 # boundary where standards earn their keep.
 class Client < ApplicationRecord
   belongs_to :realm
+  has_many :sessions, dependent: :destroy
 
   has_secure_password :client_secret, validations: false
 

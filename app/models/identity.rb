@@ -12,6 +12,7 @@ class Identity < ApplicationRecord
   devise :database_authenticatable, :recoverable, :confirmable, :lockable
 
   belongs_to :realm
+  has_many :sessions, dependent: :destroy
   belongs_to :signup_client, class_name: "Client", optional: true
 
   validates :email, presence: true,
