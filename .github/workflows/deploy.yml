@@ -22,7 +22,11 @@ jobs:
       IDENTITY_HOST: ${{ secrets.IDENTITY_HOST }}
       DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
       DEPLOY_REGISTRY_ACCOUNT: ${{ secrets.DEPLOY_REGISTRY_ACCOUNT }}
-      GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+      # A repo-level token scoped to read:packages ONLY -- deliberately not the
+      # org GH_TOKEN. That token carries write:packages, which could publish a
+      # poisoned package that all sixteen applications install on their next
+      # bundle. A public repository gets its own narrow credential instead.
+      GITHUB_TOKEN: ${{ secrets.REGISTRY_READ_TOKEN }}
     steps:
       - uses: actions/checkout@v5
 
@@ -32,29 +36,60 @@ jobs:
           bundler-cache: true
 
       - name: Write the deploy key
+        # Via env:, not interpolated. This is a multi-line PEM, which is the
+        # shape most likely to defeat log masking -- GitHub masks on exact
+        # matches, and this repository's run logs are world-readable. printf
+        # '%s' keeps the value out of the command line entirely.
+        #
+        # The filename reveals nothing: the usual one elsewhere names a private
+        # repository, which bin/check-public-safe refuses.
+        env:
+          DEPLOY_KEY: ${{ secrets.IDENTITY_DEPLOY_KEY }}
         run: |
           mkdir -p ~/.ssh
-          # A filename that reveals nothing. The usual one elsewhere names a
-          # private repository, which is exactly the kind of detail this
-          # repository must not carry -- and bin/check-public-safe refuses it,
-          # which is how this was caught rather than shipped.
-          echo "${{ secrets.KAMAL_SSH_PRIVATE_KEY }}" > ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          echo "DEPLOY_SSH_KEY=~/.ssh/id_deploy" >> "$GITHUB_ENV"
+          echo "DEPLOY_SSH_KEY=$HOME/.ssh/id_deploy" >> "$GITHUB_ENV"
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Write .kamal/secrets
+        # Every value is referenced as $NAME and resolved from the process
+        # environment, never interpolated into a command. This repository is
+        # public, so its run logs are world-readable: GitHub masks secrets, but
+        # only on exact matches, so the safest thing is for no value to reach a
+        # command line at all. Only variable NAMES appear in the log.
+        env:
+          RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          IDENTITY_SIGNING_KEY: ${{ secrets.IDENTITY_SIGNING_KEY }}
+          MAILER_SENDER: ${{ secrets.MAILER_SENDER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_READ_TOKEN }}
         run: |
           mkdir -p .kamal
           {
-            echo "RAILS_MASTER_KEY=${{ secrets.RAILS_MASTER_KEY }}"
-            echo "DATABASE_URL=${{ secrets.DATABASE_URL }}"
-            echo "GITHUB_TOKEN=${{ secrets.GH_TOKEN }}"
-            echo "IDENTITY_SIGNING_KEY=${{ secrets.IDENTITY_SIGNING_KEY }}"
-            echo "IDENTITY_ISSUER=${{ secrets.IDENTITY_ISSUER }}"
-            echo "MAILER_SENDER=${{ secrets.MAILER_SENDER }}"
-            echo "DEPLOY_REGISTRY_ACCOUNT=${{ secrets.DEPLOY_REGISTRY_ACCOUNT }}"
+            printf 'RAILS_MASTER_KEY=%s\n' "$RAILS_MASTER_KEY"
+            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+            printf 'GITHUB_TOKEN=%s\n' "$REGISTRY_TOKEN"
+            printf 'IDENTITY_SIGNING_KEY=%s\n' "$IDENTITY_SIGNING_KEY"
+            printf 'IDENTITY_ISSUER=%s\n' "$IDENTITY_ISSUER"
+            printf 'MAILER_SENDER=%s\n' "$MAILER_SENDER"
+            printf 'DEPLOY_REGISTRY_ACCOUNT=%s\n' "$DEPLOY_REGISTRY_ACCOUNT"
           } > .kamal/secrets
+          chmod 600 .kamal/secrets
+
+      - name: Install kamal
+        # Not a bundle dependency: this application does not use kamal at
+        # runtime, and adding it would pull a deploy tool into the production
+        # image. An earlier version of this workflow ran `bundle exec kamal`
+        # with kamal absent from the bundle, and would have failed on its first
+        # step.
+        run: |
+          if ! bundle exec kamal version >/dev/null 2>&1; then
+            gem install kamal --no-document
+            echo "KAMAL=kamal" >> "$GITHUB_ENV"
+          else
+            echo "KAMAL=bundle exec kamal" >> "$GITHUB_ENV"
+          fi
 
       - name: Deploy
-        run: bundle exec kamal deploy
+        run: $KAMAL deploy

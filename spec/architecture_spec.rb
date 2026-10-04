@@ -176,6 +176,76 @@ RSpec.describe "architectural rules" do
     end
   end
 
+  describe "no workflow exposes secrets to untrusted input" do
+    # This is what actually protects the secrets in a public repository, and it
+    # is the one thing that was being trusted to memory.
+    #
+    # GitHub never passes secrets to a fork's pull_request run, so the danger is
+    # not today's workflows -- it is a future one that reads a secret while
+    # triggering on something an outsider controls. pull_request_target and
+    # workflow_run run in the BASE repository's context with secrets available;
+    # issue_comment fires on anyone's comment.
+    UNTRUSTED_TRIGGERS = %w[pull_request_target issue_comment workflow_run issues].freeze
+
+    let(:workflows) { Dir[".github/workflows/*.yml"] }
+
+    it "finds the workflows" do
+      expect(workflows).not_to be_empty
+    end
+
+    it "uses no untrusted trigger anywhere" do
+      offenders = workflows.select do |path|
+        triggers = YAML.safe_load(File.read(path)).then { |y| y[true] || y["on"] }
+        keys = triggers.is_a?(Hash) ? triggers.keys.map(&:to_s) : Array(triggers).map(&:to_s)
+        keys.intersect?(UNTRUSTED_TRIGGERS)
+      end
+
+      expect(offenders).to be_empty,
+                           "these run on input an outsider controls: #{offenders}"
+    end
+
+    it "keeps secrets out of every workflow that an outsider can trigger" do
+      offenders = workflows.select do |path|
+        content = File.read(path)
+        triggers = YAML.safe_load(content).then { |y| y[true] || y["on"] }
+        keys = triggers.is_a?(Hash) ? triggers.keys.map(&:to_s) : Array(triggers).map(&:to_s)
+
+        keys.include?("pull_request") && content.match?(/secrets\./)
+      end
+
+      expect(offenders).to be_empty,
+                           "a pull_request workflow must reference no secrets: #{offenders}"
+    end
+
+    it "never interpolates a secret directly into a run block" do
+      # Values reach the shell through env:, so only NAMES appear in the
+      # world-readable run log. GitHub masks secrets, but only on exact
+      # matches, so a transformed value would slip through.
+      # Parsed rather than line-matched: an env: mapping carrying a secret is
+      # the CORRECT pattern, so a regex over lines flags the fix as the fault.
+      offenders = Dir[".github/workflows/*.yml"].select do |path|
+        YAML.safe_load(File.read(path), aliases: true)
+            .fetch("jobs", {})
+            .values
+            .flat_map { |job| job["steps"].to_a }
+            .any? { |step| step["run"].to_s.match?(/\$\{\{\s*secrets\./) }
+      end
+
+      expect(offenders).to be_empty,
+                           "pass secrets via env:, not inline in run: #{offenders}"
+    end
+
+    it "does not use the org-wide packages token" do
+      # GH_TOKEN carries write:packages, which could publish a poisoned package
+      # that every application installs. A public repository gets a read-only
+      # credential of its own.
+      offenders = workflows.select { |path| File.read(path).include?("secrets.GH_TOKEN") }
+
+      expect(offenders).to be_empty,
+                           "use a read:packages-only token instead of org GH_TOKEN: #{offenders}"
+    end
+  end
+
   describe "the public-safety gate is wired" do
     it "runs on pre-commit, on the commit message, and on pre-push" do
       lefthook = File.read("lefthook.yml")
