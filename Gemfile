@@ -54,10 +54,6 @@ gem "jwt", ">= 2.7"
 gem "rotp", ">= 6.0"
 gem "rqrcode", ">= 2.0"
 
-# json 3.0 broke ActiveSupport::JSON.decode; pinned fleet-wide until Rails
-# ships the fix.
-gem "json", "< 3"
-
 group :development, :test do
   gem "rspec-rails", "~> 8.0"
   gem "factory_bot_rails"

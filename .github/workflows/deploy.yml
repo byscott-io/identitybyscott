@@ -43,7 +43,7 @@ jobs:
       # container-registry permission -- so this is as narrow as ghcr.io allows.
       GITHUB_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: ruby/setup-ruby@v1
         with:
