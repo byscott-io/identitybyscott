@@ -85,20 +85,28 @@ test:
 # for a full overview on how database connection configuration can be specified.
 #
 production:
+  # url:, not database:/username:/password:.
+  #
+  # Rails generates the latter with a password from
+  # IDENTITYBYSCOTT_DATABASE_PASSWORD and no host at all, so it falls back to a
+  # local unix socket -- which is what happened: the first deploy to reach the
+  # host failed its healthcheck with
+  #
+  #   PG::ConnectionBad: connection to server on socket
+  #   "/var/run/postgresql/.s.PGSQL.5432" failed: No such file or directory
+  #
+  # DATABASE_URL carries the host, port, user and password together.
   primary: &primary_production
     <<: *default
-    database: identitybyscott_production
-    username: identitybyscott
-    password: <%= ENV["IDENTITYBYSCOTT_DATABASE_PASSWORD"] %>
+    url: <%= ENV["DATABASE_URL"] %>
+  # Solid Cache, Queue and Cable share the PRIMARY database and differ only by
+  # migrations_paths. Rails generates them pointing at separate
+  # _cache/_queue/_cable databases, which db:prepare then tries to create at
+  # boot and cannot -- the deploy user is not a superuser, and nothing creates
+  # them. One database per application is the fleet's pattern.
   cache:
     <<: *primary_production
-    database: identitybyscott_production_cache
     migrations_paths: db/cache_migrate
   queue:
     <<: *primary_production
-    database: identitybyscott_production_queue
     migrations_paths: db/queue_migrate
-  cable:
-    <<: *primary_production
-    database: identitybyscott_production_cable
-    migrations_paths: db/cable_migrate
