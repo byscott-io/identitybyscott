@@ -29,7 +29,14 @@ Rails.application.routes.draw do
     post "auth/verify_mfa", to: "mfa#verify"
     post "auth/forgot_password", to: "passwords#create"
     post "auth/reset_password", to: "passwords#update"
-    delete "auth/sign_out", to: "sessions#destroy"
+    # Session management. sign_out moved off SessionsController (which handles
+    # sign-IN and is unauthenticated) onto the authenticated controller, because
+    # revoking the right session requires knowing which token asked.
+    delete "auth/sign_out", to: "user_sessions#sign_out"
+    post "auth/refresh", to: "refreshes#create"
+    get "auth/sessions", to: "user_sessions#index"
+    delete "auth/sessions", to: "user_sessions#destroy_all"
+    delete "auth/sessions/:id", to: "user_sessions#destroy"
 
     get "auth/mfa", to: "mfa_enrollment#show"
     post "auth/mfa/setup", to: "mfa_enrollment#setup"

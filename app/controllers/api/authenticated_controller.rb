@@ -14,12 +14,29 @@ module Api
 
     attr_reader :current_identity
 
+    # The session this token was minted from, named by its sid claim.
+    #
+    # Scoped to the current identity as well as the id: a sid naming someone
+    # else's session must resolve to nothing, or sign_out becomes a way to log an
+    # arbitrary person out using a token of your own.
+    #
+    # nil is a legitimate answer -- a token minted without a session, such as by
+    # a test helper, carries no sid, and nothing may assume one is present.
+    def current_session
+      return @current_session if defined?(@current_session)
+
+      sid = @payload&.dig("sid")
+      @current_session = sid.present? ? current_identity.sessions.find_by(id: sid) : nil
+    end
+
     def authenticate_identity!
       token = bearer_token
       return render_unauthorized if token.blank?
 
       payload = decode(token)
       return render_unauthorized if payload.nil?
+
+      @payload = payload
 
       # An MFA challenge is signed with the same key and would otherwise pass
       # every check here. It proves a correct password and nothing more, so

@@ -54,6 +54,12 @@ gem "jwt", ">= 2.7"
 gem "rotp", ">= 6.0"
 gem "rqrcode", ">= 2.0"
 
+# Parses a User-Agent into browser / OS / device for the sessions list. A
+# deliberate copy of what corebyscott does rather than a shared dependency:
+# this server does not depend on the corebyscott gem, so that a broken core
+# release cannot take down the identity provider every app's login runs through.
+gem "browser", ">= 6.0"
+
 group :development, :test do
   gem "rspec-rails", "~> 8.0"
   gem "factory_bot_rails"

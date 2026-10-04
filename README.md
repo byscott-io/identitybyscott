@@ -58,6 +58,11 @@ DELETE /api/apps/:client_id/auth/sign_out
 PUT    /api/apps/:client_id/auth/change_password
 PUT    /api/apps/:client_id/auth/profile
 
+POST   /api/apps/:client_id/auth/refresh
+GET    /api/apps/:client_id/auth/sessions
+DELETE /api/apps/:client_id/auth/sessions/:id
+DELETE /api/apps/:client_id/auth/sessions
+
 GET    /api/apps/:client_id/auth/mfa
 POST   /api/apps/:client_id/auth/mfa/setup
 POST   /api/apps/:client_id/auth/mfa/enable
@@ -107,12 +112,21 @@ Running. What works:
   in bytes because bcrypt truncates there while Rails' length validator counts
   characters.
 - **CORS** per client, from an origin allowlist on the client's registration.
+- **Central session management.** Every accepted credential leaves a session
+  row, so the list spans every application and device rather than showing only
+  the app you happen to be looking at -- which is what no application could do
+  alone, because none of them can see the others. One call revokes them all.
+  `sign_out` revokes the session its own token was minted from. Refresh tokens
+  are stored as digests and are audience-scoped, so one leaked from one
+  application is not redeemable at another.
 
 What is missing, and should not be assumed:
 
-- **Central session management.** Tokens expire; they cannot yet be revoked, and
-  there is no sessions list. Until that exists, revocation is eventual rather
-  than immediate -- so an application with real users should not depend on it.
+- **Revocation of an ACCESS token is eventual**, bounded by its fifteen-minute
+  life. Revoking a session stops the refresh token immediately, but an access
+  token already issued stays valid until it expires -- that is the price of
+  offline verification, and it is the trade this design took deliberately.
+
 - **Client registration is console-only.** There is no admin interface.
 - **No federated or social login**, which would require a redirect flow and a
   view layer this server deliberately does not have.

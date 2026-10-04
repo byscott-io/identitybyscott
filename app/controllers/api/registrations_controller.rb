@@ -10,6 +10,7 @@ module Api
   # application owns. This endpoint is only for someone arriving with no
   # account.
   class RegistrationsController < BaseController
+    include IssuesSessions
     rate_limit to: 5, within: 1.hour, by: -> { request.remote_ip }, only: :create
 
     def create
@@ -28,12 +29,7 @@ module Api
         # until they confirm, so there is no token to give them.
         render json: { status: "confirmation_sent" }, status: :accepted
       else
-        issuer = TokenIssuer.new(identity: identity, client: Current.client)
-        render json: {
-          access_token: issuer.access_token,
-          token_type: "Bearer",
-          expires_in: TokenIssuer::ACCESS_TOKEN_TTL.to_i
-        }, status: :created
+        render json: session_response(identity), status: :created
       end
     end
 

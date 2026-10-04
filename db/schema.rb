@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_04_011727) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_04_210905) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -71,6 +71,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_04_011727) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["key"], name: "index_realms_on_key", unique: true
+  end
+
+  create_table "sessions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "identity_id", null: false
+    t.uuid "client_id", null: false
+    t.string "refresh_token_digest", null: false
+    t.string "device_name"
+    t.string "user_agent"
+    t.string "ip_address"
+    t.datetime "last_used_at"
+    t.datetime "expires_at", null: false
+    t.datetime "revoked_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["client_id"], name: "index_sessions_on_client_id"
+    t.index ["identity_id", "revoked_at"], name: "index_sessions_on_identity_id_and_revoked_at"
+    t.index ["identity_id"], name: "index_sessions_on_identity_id"
+    t.index ["refresh_token_digest"], name: "index_sessions_on_refresh_token_digest", unique: true
   end
 
   create_table "solid_cache_entries", force: :cascade do |t|
@@ -237,6 +255,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_04_011727) do
   add_foreign_key "clients", "realms"
   add_foreign_key "identities", "clients", column: "signup_client_id"
   add_foreign_key "identities", "realms"
+  add_foreign_key "sessions", "clients"
+  add_foreign_key "sessions", "identities"
   add_foreign_key "solid_queue_batch_executions", "solid_queue_batches", column: "batch_id", on_delete: :cascade
   add_foreign_key "solid_queue_batch_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade

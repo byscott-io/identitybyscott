@@ -4,6 +4,7 @@ module Api
   # The second step of sign in. The application renders its own prompt and posts
   # the code here with the challenge it was given.
   class MfaController < BaseController
+    include IssuesSessions
     # Tighter than sign-in: a TOTP code is six digits, so an unthrottled
     # endpoint is a feasible brute force rather than a theoretical one. Keyed on
     # the challenge, so one person's attempts cannot exhaust another's budget.
@@ -20,12 +21,7 @@ module Api
 
       identity.reset_failed_attempts! if identity.failed_attempts.positive?
 
-      issuer = TokenIssuer.new(identity: identity, client: Current.client)
-      render json: {
-        access_token: issuer.access_token,
-        token_type: "Bearer",
-        expires_in: TokenIssuer::ACCESS_TOKEN_TTL.to_i
-      }
+      render json: session_response(identity)
     rescue MfaChallenge::InvalidChallenge
       # Covers an expired challenge, one for another client, and an access token
       # presented in its place. All the same answer: start again.

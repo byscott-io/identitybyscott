@@ -4,6 +4,7 @@ module Api
   # Sign in. The credentials arrive from a form the APPLICATION renders, posted
   # here over HTTPS -- this server has no forms of its own.
   class SessionsController < BaseController
+    include IssuesSessions
     # Keyed on BOTH the address and the IP, because either alone is trivially
     # sidestepped: rotate addresses to beat an email limit, rotate IPs to beat
     # an address limit. This is the single door into a whole realm, so it
@@ -39,29 +40,10 @@ module Api
       render_signed_in(identity)
     end
 
-    # Nothing to revoke yet, and saying so plainly beats a comforting no-op.
-    #
-    # Access tokens are stateless with a 15 minute life and this server holds no
-    # session records, so there is nothing here to invalidate -- the client
-    # discards its token and the old one simply expires. 204 reflects that
-    # honestly rather than implying a revocation happened.
-    #
-    # This becomes real with refresh tokens and session rows, at which point it
-    # revokes the session and every access token minted from it.
-    def destroy
-      head :no_content
-    end
-
     private
 
     def render_signed_in(identity)
-      issuer = TokenIssuer.new(identity: identity, client: Current.client)
-
-      render json: {
-        access_token: issuer.access_token,
-        token_type: "Bearer",
-        expires_in: TokenIssuer::ACCESS_TOKEN_TTL.to_i
-      }
+      render json: session_response(identity)
     end
 
     # The same body and status for an unknown address and a wrong password.
