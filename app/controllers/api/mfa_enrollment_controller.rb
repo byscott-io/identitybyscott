@@ -13,6 +13,34 @@ module Api
       }
     end
 
+    # DELIBERATELY NOT the codes themselves.
+    #
+    # corebyscott's equivalent returns the raw codes, because an application on
+    # local Devise stores them in plaintext and can read them back. This server
+    # stores DIGESTS -- see Identity#backup_code_digests -- so the raw codes
+    # exist only in the response that generated them, at `enable` and
+    # `regenerate_backup_codes`. There is nothing to return, and that is correct
+    # rather than a gap: a store that can show you your codes can also show them
+    # to whoever reads the database.
+    #
+    # So this contract differs from core's on purpose. A client expecting an
+    # array gets a count, and should send the person to regenerate if they have
+    # lost them.
+    def backup_codes
+      unless current_identity.mfa_enabled?
+        return render json: { error: "MFA is not enabled" }, status: :unprocessable_content
+      end
+
+      render json: {
+        backup_codes_remaining: current_identity.backup_code_digests.length,
+        backup_codes_generated_at: current_identity.backup_codes_generated_at,
+        # Stated in the payload so an integrator reading a response, rather than
+        # this comment, understands why there is no array here.
+        detail: "Backup codes are stored hashed and cannot be retrieved. " \
+                "Regenerate to obtain a new set."
+      }
+    end
+
     # Generates a secret and hands back the provisioning URI for a QR code. The
     # secret is NOT enabled yet: enrolment is only complete once a code proves
     # the authenticator actually has it, otherwise a mistyped scan locks the

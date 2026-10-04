@@ -36,6 +36,9 @@ Rails.application.routes.draw do
     post "auth/mfa/enable", to: "mfa_enrollment#enable"
     post "auth/mfa/disable", to: "mfa_enrollment#disable"
     post "auth/mfa/regenerate_backup_codes", to: "mfa_enrollment#regenerate_backup_codes"
+    get "auth/mfa/backup_codes", to: "mfa_enrollment#backup_codes"
+    put "auth/change_password", to: "password_changes#update"
+    put "auth/profile", to: "profiles#update"
   end
 
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html

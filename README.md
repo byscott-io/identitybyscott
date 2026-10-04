@@ -55,15 +55,31 @@ POST   /api/apps/:client_id/auth/forgot_password
 POST   /api/apps/:client_id/auth/reset_password
 DELETE /api/apps/:client_id/auth/sign_out
 
+PUT    /api/apps/:client_id/auth/change_password
+PUT    /api/apps/:client_id/auth/profile
+
 GET    /api/apps/:client_id/auth/mfa
 POST   /api/apps/:client_id/auth/mfa/setup
 POST   /api/apps/:client_id/auth/mfa/enable
 POST   /api/apps/:client_id/auth/mfa/disable
+GET    /api/apps/:client_id/auth/mfa/backup_codes
 POST   /api/apps/:client_id/auth/mfa/regenerate_backup_codes
 
 GET    /.well-known/jwks.json
 GET    /.well-known/openid-configuration
 ```
+
+Two contracts are worth reading before integrating.
+
+`reset_password` takes the emailed token as **`token`**, not
+`reset_password_token`. A wrong parameter name produces a 422 that reads
+identically to an expired token.
+
+`GET .../auth/mfa/backup_codes` returns a **count, not the codes**. Backup
+codes are stored as digests, so the raw codes exist only in the response that
+generated them -- `mfa/enable` and `mfa/regenerate_backup_codes`. A store that
+can show you your codes can also show them to whoever reads the database. This
+differs on purpose from an application that keeps its own codes in plaintext.
 
 The password grant is deliberately **not** advertised in the discovery
 document. OAuth 2.1 removes it and the Security BCP advises against it, so the
