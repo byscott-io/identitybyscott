@@ -6,6 +6,15 @@ name: Deploy
 
 on:
   workflow_dispatch:
+    # Required, not optional: the fleet's DeployService always sends a no_cache
+    # input, so a workflow that declares none is rejected outright with
+    # HTTP 422 "Unexpected inputs provided". That is how this was found.
+    inputs:
+      no_cache:
+        description: "Force full rebuild without Docker cache"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-byscott-host
@@ -98,4 +107,36 @@ jobs:
           fi
 
       - name: Deploy
-        run: $KAMAL deploy
+        shell: bash
+        run: |
+          # Serialise across the WHOLE fleet with a host-side flock.
+          #
+          # The shared concurrency group above is not sufficient on its own:
+          # GitHub concurrency groups are scoped per repository, so a group of
+          # the same name in another repository does not queue behind this one.
+          # Parallel deploys then race containerd's content store and fail with
+          # "ingest commit failed: rename ... no such file or directory".
+          #
+          # The background SSH holds the lock for the duration of the deploy and
+          # is killed afterwards to release it. 30 minute wait.
+          coproc LOCKER {
+            ssh -o ServerAliveInterval=30 "$DEPLOY_SSH_USER@$DEPLOY_HOST" \
+              "flock -w 1800 /var/lock/byscott-deploy bash -c 'echo LOCKED; exec 1>&-; read _'"
+          }
+          read -r line <&"${LOCKER[0]}"
+          if [ "$line" != "LOCKED" ]; then
+            echo "Could not acquire /var/lock/byscott-deploy within 30 min"
+            exit 1
+          fi
+          echo "Acquired /var/lock/byscott-deploy; proceeding"
+
+          if [ "${{ inputs.no_cache }}" = "true" ]; then
+            $KAMAL deploy -c .kamal/deploy.yml --no-cache
+          else
+            $KAMAL deploy -c .kamal/deploy.yml
+          fi
+          KAMAL_RC=$?
+
+          kill "$COPROC_PID" 2>/dev/null || true
+          wait "$COPROC_PID" 2>/dev/null || true
+          exit $KAMAL_RC

@@ -170,9 +170,29 @@ RSpec.describe "architectural rules" do
     end
 
     it "is dispatch-only, so nothing deploys on a push" do
+      # The trigger KEYS are the property, not the value shape -- an earlier
+      # version asserted workflow_dispatch mapped to nil and broke the moment
+      # the required no_cache input was declared.
       workflow = YAML.safe_load(File.read(".github/workflows/deploy.yml"))
+      triggers = (workflow[true] || workflow["on"])
 
-      expect(workflow[true] || workflow["on"]).to eq("workflow_dispatch" => nil)
+      expect(triggers.keys).to eq([ "workflow_dispatch" ])
+    end
+
+    # The fleet's DeployService always sends a no_cache input, and a workflow
+    # declaring none is rejected with HTTP 422 before it ever starts.
+    it "declares the no_cache input the deploy service sends" do
+      workflow = YAML.safe_load(File.read(".github/workflows/deploy.yml"))
+      inputs = (workflow[true] || workflow["on"]).dig("workflow_dispatch", "inputs")
+
+      expect(inputs.keys).to include("no_cache")
+    end
+
+    # GitHub concurrency groups are scoped PER REPOSITORY, so the shared group
+    # name does not serialise across repositories. The host-side flock is what
+    # actually prevents two deploys racing containerd's content store.
+    it "takes the host-side deploy lock" do
+      expect(File.read(".github/workflows/deploy.yml")).to include("/var/lock/byscott-deploy")
     end
   end
 
