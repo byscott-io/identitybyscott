@@ -65,10 +65,24 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
           echo "DEPLOY_SSH_KEY=$HOME/.ssh/id_deploy" >> "$GITHUB_ENV"
-          # stderr NOT discarded. An earlier version sent it to /dev/null, so
-          # when this failed under `bash -e` the step exited 1 with no message
-          # at all and the cause had to be inferred from log masking.
-          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+          # An ssh CONFIG, not just a key file. Writing the key alone is not
+          # enough: ssh only offers it if the filename is one it tries by
+          # default, or if -i names it. The deploy's own `ssh` call for the host
+          # lock passes no -i, so it failed with "Permission denied
+          # (publickey)" while the key sat unused beside it.
+          #
+          # accept-new rather than a keyscan: it trusts the host on first
+          # contact and still refuses a CHANGED key, which is the property that
+          # matters, and it removes a step that can fail silently.
+          cat > ~/.ssh/config <<SSH
+          Host $DEPLOY_HOST
+            StrictHostKeyChecking accept-new
+            UserKnownHostsFile /dev/null
+            LogLevel ERROR
+            IdentityFile ~/.ssh/id_deploy
+          SSH
+          chmod 600 ~/.ssh/config
 
       - name: Write .kamal/secrets
         # Every value is referenced as $NAME and resolved from the process
