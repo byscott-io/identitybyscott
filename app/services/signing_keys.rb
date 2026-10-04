@@ -19,7 +19,7 @@ class SigningKeys
               Rails.application.credentials.identity_signing_key.presence
         raise ConfigurationError, "No signing key configured (IDENTITY_SIGNING_KEY)" if pem.nil?
 
-        key = OpenSSL::PKey::RSA.new(pem)
+        key = OpenSSL::PKey::RSA.new(decode_pem(pem))
         raise ConfigurationError, "The configured signing key has no private component" unless key.private?
 
         key
@@ -42,7 +42,7 @@ class SigningKeys
          .split("|")
          .map(&:strip)
          .compact_blank
-         .map { |pem| OpenSSL::PKey::RSA.new(pem) }
+         .map { |pem| OpenSSL::PKey::RSA.new(decode_pem(pem)) }
     end
 
     # PUBLIC material only. An RSA private key also holds d, p, q, dp, dq and
@@ -71,6 +71,46 @@ class SigningKeys
         n: base64url(public_key.n.to_s(2)),
         e: base64url(public_key.e.to_s(2))
       }
+    end
+
+    # Accepts a PEM, or base64 of one.
+    #
+    # A PEM is multi-line and .kamal/secrets is a KEY=VALUE file, so a PEM
+    # written there straight arrives as its first line only. Not hypothetical:
+    # this server booted in production with a 31-byte signing key that was the
+    # PEM's opening banner line and nothing else, and every request to the JWKS
+    # endpoint answered 500.
+    #
+    # So the configured value may be single-line base64. Store it base64-encoded
+    # rather than encoding it inside the deploy workflow: GitHub masks the
+    # literal secret string in run logs, this repository is public so those logs
+    # are world-readable, and a value transformed in the workflow is a string
+    # GitHub does not know to mask.
+    def decode_pem(value)
+      value = value.strip
+
+      if value.include?("-----BEGIN")
+        unless value.include?("-----END")
+          raise ConfigurationError,
+                "IDENTITY_SIGNING_KEY begins a PEM but does not end one (#{value.bytesize} bytes). " \
+                "A multi-line PEM does not survive a KEY=VALUE file; store it base64-encoded."
+        end
+
+        return value
+      end
+
+      decoded = begin
+        Base64.strict_decode64(value)
+      rescue ArgumentError
+        raise ConfigurationError,
+              "IDENTITY_SIGNING_KEY is neither a PEM nor base64-encoded PEM (#{value.bytesize} bytes)"
+      end
+
+      unless decoded.include?("-----BEGIN") && decoded.include?("-----END")
+        raise ConfigurationError, "IDENTITY_SIGNING_KEY decoded from base64 but is not a PEM"
+      end
+
+      decoded
     end
 
     # A digest of the public DER, not an RFC 7638 thumbprint. kid is an opaque

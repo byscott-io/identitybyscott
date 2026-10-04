@@ -94,6 +94,7 @@ jobs:
           RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           IDENTITY_SIGNING_KEY: ${{ secrets.IDENTITY_SIGNING_KEY }}
+          IDENTITY_ISSUER: ${{ secrets.IDENTITY_ISSUER }}
           MAILER_SENDER: ${{ secrets.MAILER_SENDER }}
           REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
         run: |
@@ -108,6 +109,44 @@ jobs:
             printf 'DEPLOY_REGISTRY_ACCOUNT=%s\n' "$DEPLOY_REGISTRY_ACCOUNT"
           } > .kamal/secrets
           chmod 600 .kamal/secrets
+
+          # Fail here rather than shipping a container that boots without them.
+          #
+          # Deploy 1572 reported SUCCESS with IDENTITY_ISSUER empty and
+          # IDENTITY_SIGNING_KEY holding 31 bytes -- the PEM's first line and
+          # nothing else, because a multi-line value cannot survive a KEY=VALUE
+          # file. The healthcheck passed, then the container entered a restart
+          # loop and the discovery document served an empty issuer.
+          #
+          # Lengths and line counts only. No value is printed: this repository
+          # is public and its run logs are world-readable.
+          missing=""
+          while IFS='=' read -r name value; do
+            [ -n "$name" ] || continue
+            if [ -z "$value" ]; then
+              missing="$missing $name"
+              echo "::error::$name is empty in .kamal/secrets"
+            fi
+          done < .kamal/secrets
+
+          if [ -n "$missing" ]; then
+            echo "Missing deploy secrets:$missing"
+            exit 1
+          fi
+
+          # A PEM is 27 lines and ~1700 bytes; base64 of it is one line. Either
+          # the stored value decodes to a key or the deploy stops here.
+          key_lines=$(grep -c '^IDENTITY_SIGNING_KEY=' .kamal/secrets)
+          key_bytes=$(awk -F= '/^IDENTITY_SIGNING_KEY=/ { print length($0) - length($1) - 1 }' .kamal/secrets)
+          echo "IDENTITY_SIGNING_KEY: $key_bytes bytes on $key_lines line(s)"
+
+          if [ "$key_bytes" -lt 1000 ]; then
+            echo "::error::IDENTITY_SIGNING_KEY is $key_bytes bytes -- too short to be a 2048-bit key."
+            echo "Store it base64-encoded; a raw multi-line PEM arrives as its first line only."
+            exit 1
+          fi
+
+          echo "All deploy secrets present."
 
       - name: Install kamal
         # Not a bundle dependency: this application does not use kamal at
