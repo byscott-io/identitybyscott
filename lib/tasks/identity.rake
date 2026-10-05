@@ -131,14 +131,24 @@ namespace :identity do
       end
     end
 
-    desc "List grants. [REALM=sdk] [EMAIL=person@example.com] [CLIENT_ID=metrics]"
+    desc "List grants. [REALM=sdk] [EMAIL=person@example.com, needs REALM] [CLIENT_ID=metrics]"
     task list: :environment do
       scope = Grant.includes(:identity, :client)
-      scope = scope.where(identity: Realm.find_by!(key: ENV["REALM"]).identities) if ENV["REALM"]
+      realm = ENV["REALM"] ? Realm.find_by!(key: ENV["REALM"]) : nil
+      scope = scope.where(identity: realm.identities) if realm
       scope = scope.where(granted_client_id: Client.find_by!(client_id: ENV["CLIENT_ID"]).id) if ENV["CLIENT_ID"]
 
       if ENV["EMAIL"]
-        scope = scope.where(identity: Identity.where("lower(email) = ?", ENV["EMAIL"].downcase.strip))
+        # REALM is required alongside EMAIL. An address is only unique
+        # WITHIN a realm -- the same one is a different person in each -- so
+        # an unscoped email lookup silently mixes them, which is the
+        # confusion realms exist to prevent. Scoping it is also the rule
+        # this repository states plainly: never look up an identity by
+        # email without a realm.
+        abort "EMAIL needs REALM too -- an address is only unique within a realm" if realm.nil?
+
+        identity = Identity.find_for_authentication_in_realm(realm, ENV["EMAIL"])
+        scope = identity ? scope.where(identity_id: identity.id) : scope.none
       end
 
       rows = scope.to_a.sort_by { |g| [ g.identity.email, g.client.client_id ] }
