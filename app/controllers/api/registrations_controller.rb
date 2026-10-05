@@ -24,6 +24,16 @@ module Api
 
       return render_errors(identity) unless identity.save
 
+      # Signing up through an application IS the decision to be enabled for
+      # it -- requiring a separate grant would mean every new person
+      # registers and is immediately refused. Grants gate the OTHER
+      # applications in the realm, which is the case they exist for.
+      #
+      # Created even when confirmation is pending: the grant records who may
+      # use this application, and confirmation governs when they may act on
+      # it. Deferring it would leave a confirmed identity with no way in.
+      identity.grants.create!(client: Current.client)
+
       if identity.confirmation_required?
         # Nothing is returned but an acknowledgement. The person cannot sign in
         # until they confirm, so there is no token to give them.

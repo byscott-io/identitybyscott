@@ -21,6 +21,11 @@ module Api
 
       identity.reset_failed_attempts! if identity.failed_attempts.positive?
 
+      # Sign-in refuses an ungranted identity before issuing a challenge, so
+      # reaching here ungranted means the grant was revoked mid-flow. Rare, but
+      # the alternative is a session issued by a path that never checked.
+      return render_not_granted unless grant_permits_client?(identity)
+
       render json: session_response(identity)
     rescue MfaChallenge::InvalidChallenge
       # Covers an expired challenge, one for another client, and an access token

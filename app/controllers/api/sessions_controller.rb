@@ -35,6 +35,10 @@ module Api
 
       identity.reset_failed_attempts! if identity.failed_attempts.positive?
 
+      # Before MFA, not after: making someone complete a second factor and
+      # then refusing them wastes their time and teaches nothing.
+      return render_not_granted unless grant_permits_client?(identity)
+
       return render_mfa_required(identity) if identity.mfa_enabled?
 
       render_signed_in(identity)

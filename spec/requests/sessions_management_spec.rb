@@ -11,7 +11,15 @@ RSpec.describe "central session management" do
   let(:signing_key) { OpenSSL::PKey::RSA.generate(2048) }
   let(:realm) { create(:realm, require_email_confirmation: false) }
   let(:client) { create(:client, realm: realm, allowed_origins: "https://app.example.com") }
-  let(:other_client) { create(:client, realm: realm, allowed_origins: "https://other.example.com") }
+  # A SECOND application in the same realm. Using one now requires a grant --
+  # being in the realm is not permission to use everything in it -- so these
+  # specs grant it explicitly rather than inheriting it from the factory,
+  # which only grants the application signed up through.
+  let(:other_client) do
+    create(:client, realm: realm, allowed_origins: "https://other.example.com").tap do |app|
+      create(:grant, identity: identity, client: app)
+    end
+  end
   let(:password) { "correct horse battery staple" }
   let!(:identity) do
     create(:identity, realm: realm, signup_client: client, email: "ada@example.com",

@@ -109,6 +109,71 @@ namespace :identity do
     end
   end
 
+  namespace :grant do
+    desc <<~DESC
+      Enable an identity for an application.
+      EMAIL=person@example.com REALM=sdk CLIENT_ID=metrics
+    DESC
+    task create: :environment do
+      realm = Realm.find_by!(key: ENV.fetch("REALM"))
+      identity = Identity.find_for_authentication_in_realm(realm, ENV.fetch("EMAIL"))
+      raise "No identity #{ENV.fetch('EMAIL')} in realm #{realm.key}" if identity.nil?
+
+      client = Client.find_by!(client_id: ENV.fetch("CLIENT_ID"))
+
+      grant = Grant.new(identity: identity, client: client)
+      if grant.save
+        puts "granted #{identity.email} -> #{client.client_id}"
+      elsif grant.errors.of_kind?(:granted_client_id, :taken)
+        puts "already granted: #{identity.email} -> #{client.client_id}"
+      else
+        abort "could not grant: #{grant.errors.full_messages.join(', ')}"
+      end
+    end
+
+    desc "List grants. [REALM=sdk] [EMAIL=person@example.com] [CLIENT_ID=metrics]"
+    task list: :environment do
+      scope = Grant.includes(:identity, :client)
+      scope = scope.where(identity: Realm.find_by!(key: ENV["REALM"]).identities) if ENV["REALM"]
+      scope = scope.where(granted_client_id: Client.find_by!(client_id: ENV["CLIENT_ID"]).id) if ENV["CLIENT_ID"]
+
+      if ENV["EMAIL"]
+        scope = scope.where(identity: Identity.where("lower(email) = ?", ENV["EMAIL"].downcase.strip))
+      end
+
+      rows = scope.to_a.sort_by { |g| [ g.identity.email, g.client.client_id ] }
+      puts "(none)" if rows.empty?
+      rows.each { |g| puts format("%-40s %-24s %s", g.identity.email, g.client.client_id, g.identity.realm.key) }
+    end
+
+    desc <<~DESC
+      Remove an identity's access to an application.
+      EMAIL=person@example.com REALM=sdk CLIENT_ID=metrics
+    DESC
+    task revoke: :environment do
+      realm = Realm.find_by!(key: ENV.fetch("REALM"))
+      identity = Identity.find_for_authentication_in_realm(realm, ENV.fetch("EMAIL"))
+      raise "No identity #{ENV.fetch('EMAIL')} in realm #{realm.key}" if identity.nil?
+
+      client = Client.find_by!(client_id: ENV.fetch("CLIENT_ID"))
+      grant = Grant.find_by(identity_id: identity.id, granted_client_id: client.id)
+
+      if grant.nil?
+        puts "not granted anyway: #{identity.email} -> #{client.client_id}"
+        next
+      end
+
+      grant.destroy!
+
+      # Say plainly what this does and does not reach. Applications verify
+      # access tokens offline, so a revoked grant stops the NEXT refresh and
+      # every future sign-in -- not the token someone is holding right now.
+      puts "revoked #{identity.email} -> #{client.client_id}"
+      puts "Their current access token stays valid for up to #{TokenIssuer::ACCESS_TOKEN_TTL.inspect}."
+      puts "Revoke their sessions too if that matters."
+    end
+  end
+
   desc "Generate a signing key pair. Prints the private PEM for IDENTITY_SIGNING_KEY."
   task :signing_key do
     key = OpenSSL::PKey::RSA.generate(2048)
