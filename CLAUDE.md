@@ -23,6 +23,16 @@ holds the CORS origin allowlist and the URLs this server builds emailed links
 from. Note `client_id` is a readable public **key** (`churchcare`), not a
 database id — the `id` column is an internal uuid that never leaves the server.
 
+**Grant** — permission for one identity to use one application. Existing in a
+realm is *not* permission to use the applications in it: authentication says who
+someone is, a grant says where they may take that. Signing up grants the
+application signed up through; every other application in the realm is a
+deliberate later step. A grant can only ever name an application in the
+identity's own realm, enforced rather than assumed. Revoking is deleting the
+row. The foreign key is `granted_client_id`, not `client_id`, because a uuid
+column called `client_id` sitting beside Client's public string `client_id`
+is the confusion that class already warns about.
+
 ## Request shape
 
 ```
@@ -44,6 +54,8 @@ GET  /.well-known/openid-configuration
 | `app/services/token_issuer.rb` | access-token claims |
 | `app/services/mfa_challenge.rb` | the short-lived token between password and TOTP |
 | `app/models/identity.rb` | credentials, TOTP, backup codes, realm-scoped lookup |
+| `app/models/grant.rb` | which applications an identity may use |
+| `app/controllers/concerns/issues_sessions.rb` | the one place a session is issued, and where grants are enforced |
 | `bin/check-public-safe` | refuses secrets and infrastructure detail; see the rules |
 
 ## Running it

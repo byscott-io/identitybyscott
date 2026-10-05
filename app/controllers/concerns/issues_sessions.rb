@@ -9,6 +9,30 @@
 module IssuesSessions
   private
 
+  # Whether this identity may use the calling application.
+  #
+  # Checked at the moment a session would be issued rather than beside the
+  # password, because a grant is not a credential: failing it is an
+  # authorisation answer ("not for you here"), not an authentication one, and
+  # conflating them would tell someone holding a correct password that it was
+  # wrong.
+  #
+  # Deliberately distinguishable from bad credentials. The usual argument for a
+  # single indistinguishable failure is that a specific one reveals whether an
+  # address exists -- but this response is only ever reached by someone who has
+  # ALREADY proven the password, so it reveals nothing they did not just
+  # demonstrate they knew.
+  def grant_permits_client?(identity)
+    Grant.permits?(identity: identity, client: Current.client)
+  end
+
+  def render_not_granted
+    render json: {
+      error: "Not granted",
+      detail: "This account exists but has not been enabled for this application."
+    }, status: :forbidden
+  end
+
   def session_response(identity)
     session, refresh_token = Session.issue!(
       identity: identity,

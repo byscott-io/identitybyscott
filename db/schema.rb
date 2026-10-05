@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_04_210905) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_05_224832) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -29,6 +29,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_04_210905) do
     t.index ["client_id"], name: "index_clients_on_client_id", unique: true
     t.index ["realm_id", "name"], name: "index_clients_on_realm_id_and_name", unique: true
     t.index ["realm_id"], name: "index_clients_on_realm_id"
+  end
+
+  create_table "grants", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "identity_id", null: false
+    t.uuid "granted_client_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["granted_client_id"], name: "index_grants_on_granted_client_id"
+    t.index ["identity_id", "granted_client_id"], name: "index_grants_on_identity_and_client", unique: true
+    t.index ["identity_id"], name: "index_grants_on_identity_id"
   end
 
   create_table "identities", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -253,6 +263,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_04_210905) do
   end
 
   add_foreign_key "clients", "realms"
+  add_foreign_key "grants", "clients", column: "granted_client_id"
+  add_foreign_key "grants", "identities"
   add_foreign_key "identities", "clients", column: "signup_client_id"
   add_foreign_key "identities", "realms"
   add_foreign_key "sessions", "clients"

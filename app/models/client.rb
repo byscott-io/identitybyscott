@@ -21,6 +21,8 @@
 class Client < ApplicationRecord
   belongs_to :realm
   has_many :sessions, dependent: :destroy
+  has_many :grants, foreign_key: :granted_client_id, dependent: :destroy, inverse_of: :client
+  has_many :granted_identities, through: :grants, source: :identity
 
   has_secure_password :client_secret, validations: false
 

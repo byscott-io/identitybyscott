@@ -13,6 +13,8 @@ class Identity < ApplicationRecord
 
   belongs_to :realm
   has_many :sessions, dependent: :destroy
+  has_many :grants, dependent: :destroy
+  has_many :granted_clients, through: :grants, source: :client
   belongs_to :signup_client, class_name: "Client", optional: true
 
   validates :email, presence: true,

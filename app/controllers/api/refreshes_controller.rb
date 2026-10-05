@@ -21,6 +21,19 @@ module Api
       # revoked -- which is a revocation oracle.
       return render_invalid_refresh if session.nil?
 
+      # Re-checked on every refresh, not only at sign-in. Otherwise revoking
+      # a grant would leave an existing session minting fresh access tokens
+      # for up to the refresh token's 30 days -- the grant would be gone and
+      # the access would not.
+      #
+      # Answered as an invalid refresh rather than 403: this caller holds a
+      # token, not a password, and the application's response to either is
+      # the same -- send the person back to sign in, where the 403 explains
+      # itself.
+      unless Grant.permits?(identity: session.identity, client: Current.client)
+        return render_invalid_refresh
+      end
+
       session.touch_used!
 
       issuer = TokenIssuer.new(
