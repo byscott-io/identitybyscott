@@ -1,0 +1,41 @@
+# Thin caller -- delegates to the centralized public reusable workflow. All
+# review logic lives in byscott-io/workflows; edit it there to change behaviour
+# fleet-wide.
+#
+# This repository is PUBLIC, which matters in three ways:
+#
+#   - byscott-io/workflows is public too, so calling it is permitted. A public
+#     repository cannot call a private reusable workflow, and this would have
+#     failed with a confusing error if it were private. Checked, not assumed.
+#   - A pull request from a FORK gets no secrets, so the review does not run on
+#     one. That is the correct default rather than a gap: the alternative is
+#     handing an API key to code nobody has reviewed yet.
+#   - Secrets are passed ONLY through `secrets:` to the reusable workflow, never
+#     into a `run:` block. spec/architecture_spec.rb enforces that, because the
+#     run logs here are world-readable and masking is exact-match only.
+#
+# There is deliberately NO claude-mention.yml companion. Every other repo has
+# one so an @claude comment can request a re-review, but it triggers on
+# issue_comment -- which on a public repository means ANYONE can start a run
+# holding the API key and the app's private key. The architecture spec bans that
+# trigger outright and should keep banning it.
+#
+# So a re-review here cannot be requested by commenting. The review fires on
+# `opened` and `ready_for_review`, so the way to re-request one is to convert
+# the pull request to a draft and mark it ready again.
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    uses: byscott-io/workflows/.github/workflows/claude-pr-review.yml@master
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_APP_ID: ${{ secrets.CLAUDE_APP_ID }}
+      CLAUDE_APP_PRIVATE_KEY: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
