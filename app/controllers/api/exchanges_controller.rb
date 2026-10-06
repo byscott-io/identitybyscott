@@ -27,7 +27,7 @@ module Api
   # that already hold a token and already send it this way. The `act` claim and
   # the model are the RFC's; the transport is this server's.
   class ExchangesController < AuthenticatedController
-    rate_limit to: 60, within: 1.minute, by: -> { request.headers["Authorization"].to_s[0, 64] },
+    rate_limit to: 60, within: 1.minute, by: -> { token_rate_limit_key },
                with: -> { rate_limited!(retry_after: 1.minute) }
 
     def create
@@ -75,6 +75,25 @@ module Api
 
       return false unless Grant.permits?(identity: current_identity, client: target)
 
+      # An already-exchanged token may not be exchanged again.
+      #
+      # Not an authorization concern -- every hop is gated by a grant, so
+      # chaining could never exceed what the identity may reach. It is a
+      # REVOCATION concern. An exchanged token is minted without a session and
+      # so carries no sid, and the live-session check below treats a missing sid
+      # as "nothing to check". So a second hop would skip it silently and
+      # reopen exactly the offline-verification window this endpoint exists to
+      # close -- while the README promises revocation is caught immediately
+      # here, unlike everywhere else.
+      #
+      # Chaining also loses the original actor: act would name the middle
+      # application and the first one would vanish from the record.
+      #
+      # Refused rather than threaded through, because nothing asks for it yet.
+      # Supporting it later means carrying the originating session into the
+      # exchanged token, deliberately, not relying on this gap.
+      return false if @payload&.dig("act").present?
+
       session_still_live?
     end
 
@@ -88,10 +107,11 @@ module Api
     # A token with no sid is not refused: one minted outside a session carries
     # none, and nothing in this codebase may assume one is present.
     def session_still_live?
-      sid = @payload&.dig("sid")
-      return true if sid.blank?
+      return true if @payload&.dig("sid").blank?
 
-      current_identity.sessions.active.exists?(id: sid)
+      # Reuses the inherited lookup rather than running a parallel query, so a
+      # sid naming someone else's session resolves to nothing here too.
+      current_session&.active? || false
     end
 
     # 403 rather than 404: the caller is authenticated and the request is

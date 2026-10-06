@@ -104,6 +104,13 @@ Unlike every other path here, a revoked session is caught **immediately** --
 this call reaches the server, so there is no offline-verification window to
 wait out.
 
+An exchanged token cannot itself be exchanged again. Not for authorization
+reasons (every hop is gated by a grant, so chaining could never exceed what the
+identity may reach) but to keep the sentence above true: an exchanged token is
+minted without a session and carries no `sid`, so a second hop would have
+nothing to check and would quietly reopen the window this endpoint closes. It
+would also lose the original actor from `act`.
+
 Two contracts are worth reading before integrating.
 
 `reset_password` takes the emailed token as **`token`**, not

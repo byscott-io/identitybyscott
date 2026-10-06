@@ -203,6 +203,38 @@ RSpec.describe "POST auth/exchange" do
     end
   end
 
+  describe "chaining" do
+    before { create(:grant, identity: identity, client: target_app) }
+
+    # An exchanged token carries no sid, because it is minted without a session.
+    # The live-session check treats a missing sid as "nothing to check", so a
+    # second hop would skip it silently -- reopening the offline-verification
+    # window this endpoint exists to close, while the README promises revocation
+    # is caught immediately here.
+    it "refuses a token that was itself obtained by exchange" do
+      first = exchange(sign_in, audience: target_app.client_id)["access_token"]
+      third = create(:client, realm: realm, allowed_origins: "https://c.example.com")
+      create(:grant, identity: identity, client: third)
+
+      exchange(first, audience: third.client_id, at: target_app)
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    # The guarantee that would otherwise be quietly false. Revoke the session,
+    # then try to spend an already-exchanged token for a further hop.
+    it "cannot be used to outlive a revoked session" do
+      first = exchange(sign_in, audience: target_app.client_id)["access_token"]
+      third = create(:client, realm: realm, allowed_origins: "https://c.example.com")
+      create(:grant, identity: identity, client: third)
+      identity.sessions.each(&:revoke!)
+
+      exchange(first, audience: third.client_id, at: target_app)
+
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
+
   describe "revoking the grant" do
     it "stops further exchanges" do
       create(:grant, identity: identity, client: target_app)
