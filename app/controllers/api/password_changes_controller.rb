@@ -9,7 +9,8 @@ module Api
     # as guessing it at sign-in -- more so, since a correct guess also lets the
     # attacker lock the owner out by replacing it. Keyed on the identity rather
     # than the email, because this endpoint already knows who is asking.
-    rate_limit to: 5, within: 1.minute, by: -> { request.headers["Authorization"].to_s[0, 64] }
+    rate_limit to: 5, within: 1.minute, by: -> { request.headers["Authorization"].to_s[0, 64] },
+               with: -> { rate_limited!(retry_after: 1.minute) }
 
     def update
       unless current_identity.valid_password?(params[:current_password])

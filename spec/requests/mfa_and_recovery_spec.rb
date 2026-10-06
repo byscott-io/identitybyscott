@@ -182,6 +182,33 @@ RSpec.describe "MFA verification and password recovery" do
       expect(identity.reload.valid_password?("a brand new passphrase")).to be(true)
     end
 
+    # Applications own the reset form and normally confirm there, so most
+    # callers send only `password`. But the controller used to pass the password
+    # as its OWN confirmation unconditionally, so a client that did send a
+    # mismatched confirmation had it silently discarded and the password set
+    # anyway. Accepting a parameter and ignoring it is worse than not accepting
+    # it at all.
+    it "honours a password_confirmation when the client sends one" do
+      raw = identity.send_reset_password_instructions
+
+      post "/api/apps/#{client.client_id}/auth/reset_password",
+           params: { token: raw, password: "a brand new passphrase",
+                     password_confirmation: "something else entirely" },
+           headers: headers
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(identity.reload.valid_password?("a brand new passphrase")).to be(false)
+    end
+
+    it "still accepts a reset with no confirmation sent at all" do
+      raw = identity.send_reset_password_instructions
+
+      reset(raw, "a brand new passphrase")
+
+      expect(response).to have_http_status(:ok)
+      expect(identity.reload.valid_password?("a brand new passphrase")).to be(true)
+    end
+
     it "refuses a token that was never issued" do
       reset("made-up-token", "a brand new passphrase")
 

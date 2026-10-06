@@ -106,8 +106,16 @@ Running. What works:
   *and* automatic expiry, because lockable alone hands an attacker a
   lockout denial-of-service against a central server.
 - **Confirmable**, per realm, defaulting to on.
-- **Rate limiting** on sign-in, password reset and confirmation resend, keyed on
-  IP *and* email -- either alone is sidestepped by rotating the other.
+- **Rate limiting** on sign-in, sign-up, password reset and confirmation resend,
+  keyed on IP *and* email -- either alone is sidestepped by rotating the other.
+  Signup is paired the same way rather than limited by IP alone, because a
+  church hall, an office or a school is one public address and a per-IP limit is
+  a limit on the whole building.
+
+  A limited request answers **429 with a JSON body** and a `Retry-After` header
+  carrying the window. Rails' default is a bare status with no body, which a
+  client parsing JSON unconditionally reads as a parse error rather than a rate
+  limit.
 - **Password rules**: a 12-character minimum and a **72-byte** maximum, checked
   in bytes because bcrypt truncates there while Rails' length validator counts
   characters.

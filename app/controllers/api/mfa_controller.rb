@@ -8,7 +8,8 @@ module Api
     # Tighter than sign-in: a TOTP code is six digits, so an unthrottled
     # endpoint is a feasible brute force rather than a theoretical one. Keyed on
     # the challenge, so one person's attempts cannot exhaust another's budget.
-    rate_limit to: 5, within: 1.minute, by: -> { params[:mfa_token].to_s[0, 64] }, only: :verify
+    rate_limit to: 5, within: 1.minute, by: -> { params[:mfa_token].to_s[0, 64] }, only: :verify,
+               with: -> { rate_limited!(retry_after: 1.minute) }
 
     def verify
       identity = MfaChallenge.identity_for(params[:mfa_token], client: Current.client, realm: realm)

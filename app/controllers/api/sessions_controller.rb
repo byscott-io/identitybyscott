@@ -9,8 +9,10 @@ module Api
     # sidestepped: rotate addresses to beat an email limit, rotate IPs to beat
     # an address limit. This is the single door into a whole realm, so it
     # matters more here than on one application's own endpoint.
-    rate_limit to: 10, within: 1.minute, by: -> { "#{request.remote_ip}" }, only: :create
-    rate_limit to: 5, within: 1.minute, by: -> { params[:email].to_s.downcase.strip }, only: :create
+    rate_limit to: 10, within: 1.minute, by: -> { "#{request.remote_ip}" }, only: :create,
+               with: -> { rate_limited!(retry_after: 1.minute) }
+    rate_limit to: 5, within: 1.minute, by: -> { params[:email].to_s.downcase.strip }, only: :create,
+               with: -> { rate_limited!(retry_after: 1.minute) }
 
     def create
       identity = Identity.find_for_authentication_in_realm(realm, params[:email])
