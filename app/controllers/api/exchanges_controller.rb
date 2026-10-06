@@ -31,7 +31,12 @@ module Api
                with: -> { rate_limited!(retry_after: 1.minute) }
 
     def create
-      target = Client.active.find_by(client_id: params[:audience])
+      # to_s, as every other finder here does. A nested parameter
+      # (audience[x]=y) would otherwise hand find_by an
+      # ActionController::Parameters rather than a string, turning a malformed
+      # request into a 500 instead of the uniform refusal below -- and a
+      # different response shape is itself a signal.
+      target = Client.active.find_by(client_id: params[:audience].to_s)
 
       # One answer for unknown, inactive, another realm's, and not granted.
       #

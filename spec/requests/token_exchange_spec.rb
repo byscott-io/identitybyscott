@@ -135,6 +135,17 @@ RSpec.describe "POST auth/exchange" do
       expect(response).to have_http_status(:forbidden)
     end
 
+    # A malformed request must land on the same uniform refusal, not a 500.
+    # A different shape is a signal in itself, and it is the one response an
+    # attacker can provoke without knowing anything.
+    it "refuses a nested audience parameter without erroring" do
+      post "/api/apps/#{caller_app.client_id}/auth/exchange",
+           params: { audience: { nested: "value" } },
+           headers: origin(caller_app).merge("Authorization" => "Bearer #{sign_in}")
+
+      expect(response).to have_http_status(:forbidden)
+    end
+
     it "refuses an unknown audience" do
       exchange(sign_in, audience: "no-such-application")
 
