@@ -46,6 +46,11 @@ Rails.application.routes.draw do
     get "auth/mfa/backup_codes", to: "mfa_enrollment#backup_codes"
     put "auth/change_password", to: "password_changes#update"
     put "auth/profile", to: "profiles#update"
+
+    # Exchange this application's token for one usable at another application
+    # in the same realm, for the same identity. Gated on that identity holding
+    # a grant for the target.
+    post "auth/exchange", to: "exchanges#create"
   end
 
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html

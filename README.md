@@ -59,6 +59,7 @@ PUT    /api/apps/:client_id/auth/change_password
 PUT    /api/apps/:client_id/auth/profile
 
 POST   /api/apps/:client_id/auth/refresh
+POST   /api/apps/:client_id/auth/exchange
 GET    /api/apps/:client_id/auth/sessions
 DELETE /api/apps/:client_id/auth/sessions/:id
 DELETE /api/apps/:client_id/auth/sessions
@@ -73,6 +74,42 @@ POST   /api/apps/:client_id/auth/mfa/regenerate_backup_codes
 GET    /.well-known/jwks.json
 GET    /.well-known/openid-configuration
 ```
+
+### Calling another application's API
+
+Access tokens are audience-scoped: a token minted for one application does not
+authenticate at another, so one leaked token is not a key to the whole realm.
+That also means an application's backend cannot call another's API for the
+person using it -- `auth/exchange` is how it asks.
+
+```
+POST /api/apps/billing/auth/exchange
+Authorization: Bearer <billing's own token for this identity>
+{ "audience": "metrics" }
+```
+
+It answers with an access token audienced to `metrics`, for the same `sub`,
+carrying an `act` claim naming `billing` so the receiving application can see
+the call arrived via another application rather than from someone at a
+keyboard. Every token still names exactly **one** audience; widening `aud` to
+list every granted application would have been simpler and would have made a
+single leaked token work everywhere that person is granted.
+
+The exchange is permitted only if the identity holds a **grant** for the
+target, the target is in the identity's own realm, and the presented token was
+minted for the application doing the asking. No refresh token is returned: an
+exchanged token is a short-lived delegation, not a foothold.
+
+Unlike every other path here, a revoked session is caught **immediately** --
+this call reaches the server, so there is no offline-verification window to
+wait out.
+
+An exchanged token cannot itself be exchanged again. Not for authorization
+reasons (every hop is gated by a grant, so chaining could never exceed what the
+identity may reach) but to keep the sentence above true: an exchanged token is
+minted without a session and carries no `sid`, so a second hop would have
+nothing to check and would quietly reopen the window this endpoint closes. It
+would also lose the original actor from `act`.
 
 Two contracts are worth reading before integrating.
 

@@ -63,6 +63,23 @@ module Api
       request.headers["Authorization"].to_s[/\ABearer (.+)\z/, 1]
     end
 
+    # Rate-limit bucket for an endpoint keyed on "the caller holding this
+    # token".
+    #
+    # NOT a prefix of the raw header, which is the obvious thing and is
+    # wrong. A JWT begins with its header segment -- 75 characters for an
+    # RS256 token with a kid -- and that segment is byte-identical for every
+    # token signed with the same key. Taking the first 64 characters of
+    # "Bearer <token>" therefore yields the SAME key for every identity and
+    # every application, collapsing a per-caller limit into one global bucket
+    # that any single caller can exhaust for everyone.
+    #
+    # Digest the whole token instead: distinct per token, fixed length, and
+    # it keeps the credential itself out of the cache key.
+    def token_rate_limit_key
+      Digest::SHA256.hexdigest(bearer_token.to_s)
+    end
+
     def render_unauthorized
       render json: { error: "Unauthorized" }, status: :unauthorized
     end

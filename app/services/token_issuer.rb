@@ -22,10 +22,11 @@ class TokenIssuer
     zoneinfo: :time_zone
   }.freeze
 
-  def initialize(identity:, client:, issuer: nil, session: nil)
+  def initialize(identity:, client:, issuer: nil, session: nil, actor: nil)
     @identity = identity
     @client = client
     @issuer = issuer || ENV.fetch("IDENTITY_ISSUER")
+    @actor = actor
     @session = session
   end
 
@@ -60,6 +61,19 @@ class TokenIssuer
       # any realm. It is the reverse: we tell the application, and it may verify.
       realm: @client.realm.key
     }
+
+    # act names the application that obtained this token on the identity's
+    # behalf, when it was not the identity signing in directly.
+    #
+    # Present only on an exchanged token, and informational: `aud` is what
+    # decides whether a token is usable somewhere, and that is checked
+    # already. This exists so a receiving application can SEE that a call
+    # arrived via another application rather than from someone at a keyboard,
+    # and refuse if that matters to it -- an audit trail it would otherwise
+    # have no way to reconstruct.
+    #
+    # An OAuth-standard claim name (RFC 8693 section 4.1).
+    claims[:act] = { client_id: @actor.client_id } if @actor
 
     # sid ties this token to the session it was minted from, so sign_out can
     # revoke THAT session rather than guessing, and a future revocation
