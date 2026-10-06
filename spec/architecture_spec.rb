@@ -10,6 +10,59 @@ require "rails_helper"
 # that file which can become a spec should, leaving the document to carry only
 # the reasoning and the judgement calls.
 RSpec.describe "architectural rules" do
+  # Rails' rate limiter answers a bare `head :too_many_requests` by default --
+  # no body at all. Every other failure here returns JSON, so a client parses
+  # the body unconditionally and gets a parse error instead of a rate-limit
+  # error.
+  #
+  # Checked here rather than as a request spec because the limiters cannot fire
+  # in test: `store:` defaults to `cache_store`, evaluated when the class is
+  # defined, and the test environment is :null_store -- `increment` returns nil,
+  # so the limit is never reached. A spec that drove a real limiter would
+  # therefore pass whether or not the response was fixed. This asserts the
+  # declaration instead, which is the part that can regress.
+  describe "every rate limiter returns a parseable body" do
+    let(:controller_sources) do
+      Dir[Rails.root.join("app/controllers/**/*.rb")].to_h { |path| [ path, File.read(path) ] }
+    end
+
+    it "declares with: on every rate_limit" do
+      missing = controller_sources.flat_map do |path, source|
+        # Each declaration spans the rate_limit line and its with: continuation.
+        source.scan(/rate_limit to:.*?(?=\n\s*(?:rate_limit|def |#|end\b))/m)
+              .reject { |declaration| declaration.include?("with:") }
+              .map { |declaration| "#{Pathname.new(path).relative_path_from(Rails.root)}: #{declaration[0, 60]}" }
+      end
+
+      expect(missing).to be_empty
+    end
+
+    it "renders JSON and a Retry-After header" do
+      controller = Api::BaseController.new
+      controller.set_request!(ActionDispatch::TestRequest.create)
+      controller.set_response!(Api::BaseController.make_response!(controller.request))
+
+      controller.send(:rate_limited!, retry_after: 1.minute)
+
+      expect(controller.response.status).to eq(429)
+      expect(controller.response.get_header("Retry-After")).to eq("60")
+      expect(JSON.parse(controller.response.body)).to include("error" => "Too many requests")
+    end
+  end
+
+  # A church hall, an office or a school is one public address, so a per-IP
+  # signup limit is a limit on the whole building -- the sixth person in a group
+  # signing up together was refused. The pairing is what makes a generous IP
+  # figure affordable, so it is the pairing that must not quietly revert.
+  describe "signup is not limited by IP alone" do
+    let(:source) { File.read(Rails.root.join("app/controllers/api/registrations_controller.rb")) }
+
+    it "limits by address as well as by IP" do
+      expect(source).to match(/rate_limit to: \d+, within: [\w.]+, by: -> \{ request\.remote_ip \}/)
+      expect(source).to match(/rate_limit to: \d+, within: [\w.]+, by: -> \{ params\[:email\]/)
+    end
+  end
+
   describe "email is unique PER REALM, never globally" do
     let(:indexes) { ActiveRecord::Base.connection.indexes(:identities) }
 

@@ -11,7 +11,19 @@ module Api
   # account.
   class RegistrationsController < BaseController
     include IssuesSessions
-    rate_limit to: 5, within: 1.hour, by: -> { request.remote_ip }, only: :create
+    # A church hall, an office or a school is ONE public address, so a per-IP
+    # signup limit is a limit on the whole building. Five an hour meant the
+    # sixth person in a group signing up together was refused -- and, before
+    # the 429 carried a body, refused with nothing to read.
+    #
+    # Paired instead, the way sign_in already is: a generous per-IP bound a real
+    # group does not reach, and a tight per-address one. Neither alone holds --
+    # rotate addresses to beat the address limit, rotate addresses' IPs to beat
+    # the IP limit -- but the pair is what makes the IP figure affordable.
+    rate_limit to: 30, within: 1.hour, by: -> { request.remote_ip }, only: :create,
+               with: -> { rate_limited!(retry_after: 1.hour) }
+    rate_limit to: 3, within: 1.hour, by: -> { params[:email].to_s.downcase.strip }, only: :create,
+               with: -> { rate_limited!(retry_after: 1.hour) }
 
     def create
       identity = realm.identities.new(

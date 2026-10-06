@@ -11,7 +11,8 @@ module Api
 
     # The refresh token is a long-lived bearer credential, so guessing attempts
     # are worth throttling even though the space is 256 bits.
-    rate_limit to: 20, within: 1.minute, by: -> { request.remote_ip }
+    rate_limit to: 20, within: 1.minute, by: -> { request.remote_ip },
+               with: -> { rate_limited!(retry_after: 1.minute) }
 
     def create
       session = Session.authenticate(params[:refresh_token], client: Current.client)

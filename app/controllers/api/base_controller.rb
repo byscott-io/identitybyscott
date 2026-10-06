@@ -35,6 +35,28 @@ module Api
       Current.client.realm
     end
 
+    # Every rate limiter answers with this rather than Rails' default, which
+    # is a bare `head :too_many_requests` -- no body at all.
+    #
+    # An empty 429 is worse than an unhelpful one. Every other failure here
+    # returns JSON, so a client parses the body unconditionally, gets a parse
+    # error instead of a rate-limit error, and then reports something
+    # misleading or crashes. That is how this was found.
+    #
+    # Retry-After is the WINDOW, not the time remaining. Rails' limiter does
+    # not expose when the current window opened, so a precise value is not
+    # available -- the window is the honest upper bound, and a client that
+    # waits it out is always safe. Deliberately not guessed more finely: too
+    # short a value sends a caller straight back into the limit.
+    def rate_limited!(retry_after:)
+      response.set_header("Retry-After", retry_after.to_i.to_s)
+
+      render json: {
+        error: "Too many requests",
+        detail: "Try again in #{ActiveSupport::Duration.build(retry_after.to_i).inspect}."
+      }, status: :too_many_requests
+    end
+
     # From the PATH explicitly, not from params.
     #
     # params merges path, query string and body. Rails does give path segments
