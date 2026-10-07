@@ -19,6 +19,19 @@ namespace :identity do
       puts "  email confirmation: #{realm.require_email_confirmation ? 'required' : 'not required'}"
     end
 
+    desc <<~DESC
+      Turn single sign-on on or off for a realm. KEY=sdk ENABLED=true
+      Off everywhere by default; nothing reads it until /authorize exists.
+    DESC
+    task sso: :environment do
+      realm = Realm.find_by!(key: ENV.fetch("KEY"))
+      enabled = ActiveModel::Type::Boolean.new.cast(ENV.fetch("ENABLED"))
+      realm.update!(sso_enabled: enabled)
+
+      puts "#{realm.key}: sso_enabled=#{realm.sso_enabled}"
+      puts "Applications in this realm may share a browser session once /authorize ships." if enabled
+    end
+
     desc "List realms"
     task list: :environment do
       Realm.order(:key).each do |realm|
@@ -94,6 +107,44 @@ namespace :identity do
 
       client.update!(allowed_origins: (client.allowed_origins_list + [ origin ]).join(" "))
       puts "#{client.client_id} now allows: #{client.allowed_origins_list.join(', ')}"
+    end
+
+    desc <<~DESC
+      Register where authorization codes may be returned to.
+      CLIENT_ID=churchcare URI=https://churchcare.net/auth/callback
+
+      Matched EXACTLY when /authorize ships -- no wildcards and no prefixes, so
+      register every form a real callback needs.
+    DESC
+    task add_redirect_uri: :environment do
+      client = Client.find_by!(client_id: ENV.fetch("CLIENT_ID"))
+      uri = ENV.fetch("URI")
+
+      parsed = URI.parse(uri) rescue nil
+      abort "not an absolute https URI: #{uri}" unless parsed.is_a?(URI::HTTPS) || parsed&.scheme == "http"
+
+      if client.redirect_uri_allowed?(uri)
+        puts "already registered: #{uri}"
+        next
+      end
+
+      client.update!(redirect_uris: (client.redirect_uris_list + [ uri ]).join(" "))
+      puts "#{client.client_id} now returns codes to:"
+      client.redirect_uris_list.each { |u| puts "  #{u}" }
+    end
+
+    desc "Remove a redirect URI. CLIENT_ID=churchcare URI=https://churchcare.net/auth/callback"
+    task remove_redirect_uri: :environment do
+      client = Client.find_by!(client_id: ENV.fetch("CLIENT_ID"))
+      uri = ENV.fetch("URI")
+
+      unless client.redirect_uri_allowed?(uri)
+        puts "not registered anyway: #{uri}"
+        next
+      end
+
+      client.update!(redirect_uris: (client.redirect_uris_list - [ uri ]).join(" "))
+      puts "#{client.client_id} no longer returns codes to #{uri}"
     end
 
     desc "Deactivate an application, refusing every request it makes. CLIENT_ID=churchcare"

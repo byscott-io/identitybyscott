@@ -74,6 +74,30 @@ class Client < ApplicationRecord
     allowed_origins_list.include?(origin)
   end
 
+    # Where an authorization code may be sent back to.
+    #
+    # Nothing reads this yet -- /authorize does not exist. It lands now so a
+    # client can be registered ahead of the endpoint that will enforce it.
+    def redirect_uris_list
+      split_list(redirect_uris)
+    end
+
+    # EXACT string equality, and nothing cleverer.
+    #
+    # A code is a credential, so where it may be delivered is the single most
+    # important thing this record states. Every relaxation is a known way
+    # codes reach the wrong party: a prefix match lets
+    # https://app.example.com.attacker.test through, a host-only match
+    # ignores the path, and a wildcard in the path lets an open redirect on
+    # the application carry the code onward.
+    #
+    # If a legitimate callback needs to vary, register each form.
+    def redirect_uri_allowed?(uri)
+      return false if uri.blank?
+
+      redirect_uris_list.include?(uri)
+    end
+
   private
 
   def split_list(value)

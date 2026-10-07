@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_05_224832) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_07_002433) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -26,6 +26,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_05_224832) do
     t.datetime "updated_at", null: false
     t.string "app_base_url"
     t.jsonb "url_templates", default: {}, null: false
+    t.text "redirect_uris", default: "", null: false
     t.index ["client_id"], name: "index_clients_on_client_id", unique: true
     t.index ["realm_id", "name"], name: "index_clients_on_realm_id_and_name", unique: true
     t.index ["realm_id"], name: "index_clients_on_realm_id"
@@ -80,6 +81,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_05_224832) do
     t.boolean "require_email_confirmation", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "sso_enabled", default: false, null: false
     t.index ["key"], name: "index_realms_on_key", unique: true
   end
 

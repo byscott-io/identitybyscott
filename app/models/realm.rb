@@ -14,6 +14,22 @@ class Realm < ApplicationRecord
                             message: "must be lowercase letters, digits, hyphen or underscore" }
   validates :name, presence: true
 
+  # Whether applications in this realm may use single sign-on.
+  #
+  # Off everywhere until deliberately turned on. A realm answers "are these
+  # the same humans?", and sharing an identity does not oblige a suite to
+  # share a browser session: a realm with one application gains nothing, and
+  # the cost -- a session at this server, which must then be revocable
+  # alongside every refresh token -- is only worth paying where people move
+  # between applications.
+  #
+  # Nothing reads this yet. /authorize will, and must enforce it SERVER-side:
+  # an application that could opt itself in by editing a URL would make the
+  # control decorative.
+  def sso?
+    sso_enabled?
+  end
+
   # Resolve a realm from the client_id a request presents. The ONLY way a realm
   # is ever determined: it is never read from a parameter, because an app that
   # could send realm=church could claim any realm and the isolation would be
