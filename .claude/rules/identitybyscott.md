@@ -25,46 +25,82 @@ dependency list is a security property. The npm package is also unusable here �
 it is served from a private registry, and a public repository must never hold a
 token.
 
-## API only, and exactly one cookie
+## API only, plus the hosted login page
 
-`config.api_only = true`, `ActionController::API`, no session store and no
-flash. The only views are mailer templates.
+`config.api_only = true`, no session store and no flash. Every credential
+endpoint is `ActionController::API` and stateless.
 
-Do not add an HTML page, a Rails session or a flash. Applications render every
-form — sign in, sign up, password reset, MFA prompts — and post credentials
-here.
+**Do not add a Rails session or a flash.** Rails' CSRF keys its token to a
+session, so reaching for `protect_from_forgery` would put an ambient credential
+on every path here — which is what the uniform-failure and no-CSRF reasoning
+elsewhere rests on. `DoubleSubmitCsrf` does the job with one cookie instead.
 
-**The one cookie is the single sign-on session**, and it is confined on purpose:
+### HTML exists, for the login page and nothing else
 
-- Set and cleared only in `SsoCookie`. One file, so its attributes are stated
-  once and cannot be weakened by a copy somewhere else.
-- `path=/sso`, which is the load-bearing part. The browser decides what to
-  attach by path, so the cookie is simply absent from every request under
-  `/api` — not by a convention this code has to remember, but because the
-  browser never sends it. **Nothing under `app/controllers/api` may read a
-  cookie**, and a spec enforces that by grepping the directory.
-- `HttpOnly`, `Secure` outside local, `SameSite=Lax`, no `Domain`. Lax is what
-  lets `/authorize` work at all — it still rides a top-level navigation — and
-  what stops the SSO surface being driven from a cross-site fetch or iframe.
-  Never `None`.
-- Opaque value, digest stored. Not a signed or encrypted cookie: a signed
-  cookie is self-contained and so stays valid until it expires whatever the
-  database says, and this credential has to be revocable.
-- Revoked by `sign_out` and by log-out-everywhere. A realm session that
-  survived sign-out would make sign-out decorative — the application would
-  bounce through `/authorize` and be signed straight back in.
+This was forbidden outright while apps owned their forms. It changed because
+that design leaves the password field in an **application's** origin, and then
+that application's XSS steals the **credential**, not a session. No token
+binding fixes it — script on a registered origin can do whatever the real page
+can — and an embedded form does not either: an iframe stops script *reading* the
+field but not drawing a convincing fake over it. Only a top-level page on this
+server's origin fixes both, because only it gives somebody an **address bar** to
+check who is asking.
 
-So the API still has **no ambient credential**, which is why it still needs no
-CSRF token: a request to `/api` cannot carry anything but a bearer token the
-caller attached deliberately.
+So HTML is permitted **only** under `app/views/sso` and `app/views/layouts/sso`,
+and an architecture spec enforces that.
 
-`/authorize` is where that changes, and it is the thing to get right when it
-lands. It will be reached by a top-level navigation carrying the cookie, so it
-is the first endpoint here with an ambient credential. Its protection is not a
-CSRF token but the shape of the flow: `SameSite=Lax`, a `redirect_uri` matched
-exactly against the client's registered list, and the `state` the application
-checks on the way back. It must stay a GET that mints a code for a registered
-URI and nothing else — any state change behind that cookie is CSRF-able.
+**The page carries NO JavaScript, and that is what makes this acceptable.** It
+ships `script-src 'none'`, so views created no XSS surface in the process
+holding the signing key and every password hash. Never add script to it — not a
+helper, not an analytics tag, not an inline handler. A spec greps the views for
+it.
+
+Also fixed by specs, and all load-bearing: `frame-ancestors 'none'` (an embedded
+login page cannot show whose it is), `form-action 'self'`, `default-src 'none'`,
+`base-uri 'none'`, `img-src 'self'` with the logo served from here rather than a
+remote URL, the one `<style>` block admitted by **nonce** rather than
+`'unsafe-inline'`, `Referrer-Policy: no-referrer` so the authorize URL's `state`
+and PKCE challenge never reach the application, and `Cache-Control: no-store`.
+
+### Theming is tokens, never CSS, and never from the request
+
+Appearance lives on the `Client` record — same principle as the realm. Anything
+an application can put in a URL, anyone can put in a URL, and a login page
+restyled by a link is one that can be made to look like something else.
+
+`Theme` validates on the way in and `ThemeCss` re-checks on the way out, falling
+back rather than emitting what it cannot recognise. The form, its fields and the
+page structure are **not** themeable: apps control chrome, never the thing a
+password is typed into.
+
+### Two cookies, each written in exactly one place
+
+| | |
+|---|---|
+| `SsoCookie` | the realm session. Read only by `/sso/authorize` |
+| `DoubleSubmitCsrf` | the login form's token |
+
+Each is `HttpOnly`, `Secure` outside local, path-scoped to `/sso`, and host-only
+with no `Domain`. A writer anywhere else would be a second, unreviewed set of
+those attributes, which is how one ends up subtly weaker than the other — a spec
+enforces the single writer.
+
+**The realm cookie is established only in reply to a credential submission from
+that browser.** That is what makes session fixation structurally impossible
+rather than mitigated: there is no token to transplant into somebody else's
+browser. Never reintroduce a mechanism that *plants* a session — a bootstrap
+token did exactly that and was reverted for it, and the review that found it is
+worth re-reading before adding anything similar.
+
+### The credential sequence lives in `CredentialCheck`
+
+Two things ask whether a password gets somebody in — the API and the page. The
+checks are **ordered** and the order is load-bearing: unknown address
+indistinguishable from wrong password, a lock reported only after the password
+verifies, the grant checked before any second factor. Do not inline that
+sequence anywhere; a drifted copy would not look broken, it would just stop
+asking something.
+
 
 ## Email is unique PER REALM, never globally
 

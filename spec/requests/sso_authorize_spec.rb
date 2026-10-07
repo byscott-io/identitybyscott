@@ -206,40 +206,74 @@ RSpec.describe "GET /sso/authorize" do
     end
   end
 
+  # Sends the browser to the hosted login page, rather than back to the
+  # application with login_required. The application has no form of its own to
+  # fall back to under single sign-on -- that is the point of the page.
   describe "when the browser holds no realm session" do
-    it "answers login_required so the application can show its own form" do
+    it "sends the browser to the hosted login page" do
       authorize
+
+      expect(response).to have_http_status(:see_other)
+      expect(location.path).to eq("/sso/login")
+      expect(query["authorization"]).to be_present
+    end
+
+    # The signed statement of what this request already validated, so the POST
+    # does not have to re-derive the redirect_uri from user input.
+    it "carries the validated request as a signed statement" do
+      authorize
+
+      decoded = PendingAuthorization.decode(query["authorization"])
+
+      expect(decoded[:client_id]).to eq(client.client_id)
+      expect(decoded[:redirect_uri]).to eq(callback)
+      expect(decoded[:state]).to eq("opaque-state")
+      expect(decoded[:code_challenge]).to eq(challenge)
+    end
+
+    it "sends no code and no error to the application" do
+      authorize
+
+      expect(location.host).to eq("identity.test").or eq("www.example.com")
+      expect(query).not_to have_key("code")
+      expect(query).not_to have_key("error")
+    end
+
+    [
+      [ "a revoked session", -> { s, raw = SsoSession.issue!(identity: Identity.last); SsoSession.authenticate(raw).revoke!; raw } ],
+      [ "an expired session", -> { s, raw = SsoSession.issue!(identity: Identity.last); s.update_column(:expires_at, 1.second.ago); raw } ],
+      [ "a garbage cookie", -> { SecureRandom.urlsafe_base64(32) } ]
+    ].each do |description, build|
+      it "offers the login page for #{description}" do
+        cookies[SsoCookie::COOKIE_NAME] = build.call
+
+        authorize
+
+        expect(response).to have_http_status(:see_other)
+        expect(location.path).to eq("/sso/login")
+      end
+    end
+  end
+
+  # The silent mode survives, and is the ONLY thing that still gets
+  # login_required. It exists so an application can ask "is there a session?"
+  # without a form appearing, and answering it with one would make silent
+  # authentication impossible to attempt safely.
+  describe "prompt=none" do
+    it "answers login_required rather than showing a form" do
+      authorize(prompt: "none")
 
       expect(response).to have_http_status(:found)
       expect(location.host).to eq("app.example.com")
       expect(query["error"]).to eq("login_required")
-      expect(query).not_to have_key("code")
     end
 
-    it "answers login_required for a revoked session" do
-      _s, raw = SsoSession.issue!(identity: identity)
-      SsoSession.authenticate(raw).revoke!
+    it "shows no form for a foreign-realm session either" do
+      other = create(:identity, realm: create(:realm, sso_enabled: true))
+      _s, raw = SsoSession.issue!(identity: other)
       cookies[SsoCookie::COOKIE_NAME] = raw
 
-      authorize
-
-      expect(query["error"]).to eq("login_required")
-    end
-
-    it "answers login_required for an expired session" do
-      session, raw = SsoSession.issue!(identity: identity)
-      session.update_column(:expires_at, 1.second.ago)
-      cookies[SsoCookie::COOKIE_NAME] = raw
-
-      authorize
-
-      expect(query["error"]).to eq("login_required")
-    end
-
-    it "answers login_required for a garbage cookie" do
-      cookies[SsoCookie::COOKIE_NAME] = SecureRandom.urlsafe_base64(32)
-
-      authorize
+      authorize(prompt: "none")
 
       expect(query["error"]).to eq("login_required")
     end
@@ -266,13 +300,13 @@ RSpec.describe "GET /sso/authorize" do
   end
 
   describe "prompt=login" do
-    it "refuses to answer from the cookie, even though it is good" do
+    it "goes to the form without looking at the cookie, even though it is good" do
       sign_in_browser
 
       authorize(prompt: "login")
 
-      expect(query["error"]).to eq("login_required")
-      expect(query).not_to have_key("code")
+      expect(response).to have_http_status(:see_other)
+      expect(location.path).to eq("/sso/login")
     end
 
     it "mints no code" do
@@ -289,14 +323,18 @@ RSpec.describe "GET /sso/authorize" do
     let(:other_realm) { create(:realm, sso_enabled: true) }
     let(:other_identity) { create(:identity, realm: other_realm) }
 
+    # Indistinguishable from having no session at all -- same status, same path,
+    # no error. A different answer would tell the application this browser is
+    # signed in to a realm it cannot see.
     it "is refused, and told nothing about the other realm" do
       sign_in_browser(other_identity)
+      authorize
+      with_foreign_session = [ response.status, location.path, query.key?("error") ]
 
+      cookies.delete(SsoCookie::COOKIE_NAME)
       authorize
 
-      # Identical to having no session at all. A distinct answer would tell the
-      # application this browser is signed in to a realm it cannot see.
-      expect(query["error"]).to eq("login_required")
+      expect([ response.status, location.path, query.key?("error") ]).to eq(with_foreign_session)
       expect(query).not_to have_key("code")
     end
 
@@ -314,7 +352,8 @@ RSpec.describe "GET /sso/authorize" do
 
       authorize
 
-      expect(query["error"]).to eq("login_required")
+      expect(response).to have_http_status(:see_other)
+      expect(location.path).to eq("/sso/login")
     end
   end
 

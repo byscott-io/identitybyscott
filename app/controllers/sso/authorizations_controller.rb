@@ -96,12 +96,12 @@ module Sso
       # business.
       return redirect_error("login_required") unless client.realm.sso?
 
-      # prompt=login means "do not reuse the session". The cookie is not even
-      # looked at, so this cannot be answered from one.
-      return redirect_error("login_required") if requested["prompt"] == "login"
+      # prompt=login means "do not reuse the session", so the cookie is not even
+      # looked at and this goes straight to the form.
+      return offer_login(client) if requested["prompt"] == "login"
 
       session = sso_session_from_cookie
-      return redirect_error("login_required") if session.nil?
+      return offer_login(client) if session.nil?
 
       # The cross-realm check, and the reason SsoSession.authenticate takes no
       # client: the cookie proves a browser is someone in SOME realm and says
@@ -120,7 +120,7 @@ module Sso
       #
       # It is also the check that would still hold if grants were ever relaxed,
       # which is worth keeping for a property this load-bearing.
-      return redirect_error("login_required") unless session.identity.realm_id == client.realm_id
+      return offer_login(client) unless session.identity.realm_id == client.realm_id
 
       # Authentication is not authorisation. Being someone in the realm does not
       # entitle a browser to a code for every application in it.
@@ -151,6 +151,31 @@ module Sso
     # string even if a route or a verb changes underneath it.
     def requested
       @requested ||= request.query_parameters
+    end
+
+    # Sends the browser to the hosted login page, carrying what this request
+    # already validated as a signed statement rather than as parameters to be
+    # validated again.
+    #
+    # prompt=none is the exception and gets login_required instead: that mode
+    # exists precisely so an application can ask "is there a session?" without
+    # a form appearing, and answering it with one would make silent
+    # authentication impossible to attempt safely.
+    #
+    # A realm MISMATCH comes here too, and is indistinguishable from having no
+    # session at all. A distinct answer would tell the application this browser
+    # is signed in to a realm it cannot see.
+    def offer_login(client)
+      return redirect_error("login_required") if requested["prompt"] == "none"
+
+      redirect_to sso_login_form_path(authorization: PendingAuthorization.encode(
+        client_id: client.client_id,
+        redirect_uri: @redirect_uri,
+        state: @state,
+        code_challenge: requested["code_challenge"],
+        nonce: requested["nonce"],
+        scope: requested["scope"]
+      )), status: :see_other
     end
 
     def issue_code(client, session)
@@ -194,18 +219,8 @@ module Sso
     end
 
     def redirect_to_app(**query)
-      redirect_to build_redirect(query), allow_other_host: true, status: :found
-    end
-
-    # Appends to whatever the registered URI already carries rather than
-    # replacing its query. A registered callback is allowed to have its own
-    # parameters, and clobbering them would break it in a way that looks like
-    # our bug in their code.
-    def build_redirect(query)
-      uri = URI.parse(@redirect_uri)
-      existing = URI.decode_www_form(uri.query.to_s)
-      uri.query = URI.encode_www_form(existing + query.compact.transform_keys(&:to_s).to_a)
-      uri.to_s
+      redirect_to AuthorizeRedirect.build(@redirect_uri, **query),
+                  allow_other_host: true, status: :found
     end
   end
 end

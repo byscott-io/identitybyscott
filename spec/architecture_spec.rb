@@ -170,23 +170,76 @@ RSpec.describe "architectural rules" do
       expect(ambient).to be_empty, "a session or flash reintroduces CSRF: #{ambient}"
     end
 
-    # One cookie, written in one place. The attributes that make it safe --
-    # HttpOnly, SameSite, the path scope, no Domain -- are stated once in
-    # SsoCookie, and a second writer elsewhere would be a second, unreviewed
-    # set of them.
-    it "writes cookies from SsoCookie and nowhere else" do
-      writers = Dir["app/**/*.rb"].reject { |path| path.end_with?("concerns/sso_cookie.rb") }
+    # Two cookies, each written in exactly ONE place.
+    #
+    #   SsoCookie          the realm session, read only by /sso/authorize
+    #   DoubleSubmitCsrf   the login form's CSRF token
+    #
+    # The attributes that make each safe -- HttpOnly, SameSite, the path scope,
+    # no Domain -- are stated once per cookie. A writer anywhere else would be a
+    # second, unreviewed set of them, which is how one ends up subtly weaker
+    # than the other.
+    COOKIE_WRITERS = [
+      "concerns/sso_cookie.rb",
+      "concerns/double_submit_csrf.rb"
+    ].freeze
+
+    it "writes cookies only from the two concerns that own one" do
+      writers = Dir["app/**/*.rb"].reject { |path| COOKIE_WRITERS.any? { |o| path.end_with?(o) } }
                                   .select do |path|
         File.read(path).match?(/cookies\s*\[[^\]]+\]\s*=|(?:set|delete)_cookie/)
       end
 
-      expect(writers).to be_empty, "the SSO cookie's attributes are stated once: #{writers}"
+      expect(writers).to be_empty,
+                         "each cookie's attributes are stated once, in its own concern: #{writers}"
     end
 
-    it "has no view templates outside mailers" do
-      views = Dir["app/views/**/*.erb"].reject { |path| path.include?("mailer") }
+    # HTML exists now, and only for the hosted login page.
+    #
+    # It was forbidden outright because an app-owned form was the whole design.
+    # That changed when it became clear the app's own origin holding the
+    # password field means that app's XSS steals the CREDENTIAL, not a session --
+    # and that only a top-level page on this origin gives somebody an address
+    # bar to check who is asking.
+    #
+    # The narrowing is tight rather than a deletion: HTML may live only under
+    # the login page's own directories.
+    HTML_ALLOWED_UNDER = %w[app/views/layouts/sso app/views/sso].freeze
 
-      expect(views).to be_empty, "this server renders no HTML: #{views}"
+    it "renders HTML only for the hosted login page" do
+      views = Dir["app/views/**/*.erb"]
+              .reject { |path| path.include?("mailer") }
+              .reject { |path| HTML_ALLOWED_UNDER.any? { |dir| path.start_with?(dir) } }
+
+      expect(views).to be_empty, "HTML here is the login page and nothing else: #{views}"
+    end
+
+    # The property that makes serving HTML acceptable in the process holding the
+    # signing key and every password hash: there is no script, so there is no
+    # XSS surface for views to have created.
+    it "has no JavaScript anywhere in those views" do
+      offenders = Dir["app/views/**/*.erb"].select do |path|
+        File.read(path).match?(/<script|javascript:|\bon(?:click|load|error|submit)=/i)
+      end
+
+      expect(offenders).to be_empty, "the login page ships script-src 'none': #{offenders}"
+    end
+
+    it "declares script-src 'none' on the login page" do
+      source = self.class.code_without_comments("app/controllers/sso/logins_controller.rb")
+
+      expect(source).to include("script-src 'none'")
+      expect(source).to include("frame-ancestors 'none'")
+      expect(source).to include("form-action 'self'")
+    end
+
+    # Rails' CSRF keys its token to a session, so using it would mean adding a
+    # session store -- an ambient credential on every path here. The login page
+    # uses one cookie instead.
+    it "still adds no session store, even with a form to protect" do
+      stack = Rails.application.middleware.map { |m| m.klass.to_s }
+
+      expect(stack.grep(/Session|Flash/)).to be_empty
     end
   end
 

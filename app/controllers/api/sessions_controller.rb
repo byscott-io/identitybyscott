@@ -14,36 +14,24 @@ module Api
     rate_limit to: 5, within: 1.minute, by: -> { params[:email].to_s.downcase.strip }, only: :create,
                with: -> { rate_limited!(retry_after: 1.minute) }
 
+    # The sequence, its ordering and the reasons for it live in CredentialCheck,
+    # because the hosted login page asks exactly the same question and two
+    # copies of an ORDERED security check drift without looking broken -- a copy
+    # that quietly stopped asking something would still read fine.
     def create
-      identity = Identity.find_for_authentication_in_realm(realm, params[:email])
+      result = CredentialCheck.call(
+        realm: realm, client: Current.client,
+        email: params[:email], password: params[:password]
+      )
 
-      # Deliberately indistinguishable from a wrong password. Saying "no such
-      # account" would turn this into a way to ask which realm an address
-      # exists in -- which is exactly the cross-realm fact realms isolate.
-      return render_invalid_credentials if identity.nil?
-
-      unless identity.valid_password?(params[:password])
-        # Lockable counts this. Devise increments failed_attempts and locks at
-        # the configured maximum.
-        identity.increment_failed_attempts
-        identity.lock_access! if identity.failed_attempts >= Devise.maximum_attempts && !identity.access_locked?
-        return render_invalid_credentials
+      case result.outcome
+      when :invalid then render_invalid_credentials
+      when :locked then render_locked
+      when :unconfirmed then render_unconfirmed
+      when :not_granted then render_not_granted
+      when :mfa_required then render_mfa_required(result.identity)
+      when :ok then render_signed_in(result.identity)
       end
-
-      # Checked AFTER the password, on purpose. Reporting a lock to someone who
-      # does not know the password tells them the address exists.
-      return render_locked if identity.access_locked?
-      return render_unconfirmed unless identity.active_for_authentication?
-
-      identity.reset_failed_attempts! if identity.failed_attempts.positive?
-
-      # Before MFA, not after: making someone complete a second factor and
-      # then refusing them wastes their time and teaches nothing.
-      return render_not_granted unless grant_permits_client?(identity)
-
-      return render_mfa_required(identity) if identity.mfa_enabled?
-
-      render_signed_in(identity)
     end
 
     private

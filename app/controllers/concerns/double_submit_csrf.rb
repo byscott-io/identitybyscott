@@ -1,0 +1,108 @@
+# frozen_string_literal: true
+
+# CSRF for the hosted login page, WITHOUT a Rails session.
+#
+# == Why not Rails' own
+#
+# `protect_from_forgery` keys the token to the session, so using it would mean
+# adding a session store -- an ambient credential on every path here, which is
+# exactly what the architecture spec bans and what the API-only rule warns
+# about. The login page needs one cookie for one purpose, not a session.
+#
+# == Why a bare signed token is not enough
+#
+# The obvious shortcut is a signed, timestamped token in the form and no cookie.
+# It does not work: an attacker can fetch the login page themselves, get a
+# perfectly valid token, and put it in their own auto-submitting form. The token
+# has to be bound to the BROWSER, which means something only that browser has.
+#
+# == What this does
+#
+# Double submit. A random value goes into an HttpOnly cookie and into a hidden
+# field; the POST is refused unless they match. An attacker can neither read nor
+# set our cookie in the victim's browser, so their form carries their value and
+# the victim's cookie -- a mismatch.
+#
+# This is what stops LOGIN CSRF: without it, an attacker's page could submit
+# their own credentials through the victim's browser, and the victim would be
+# signed in as the attacker with everything they typed afterwards going to the
+# attacker's account.
+#
+# SameSite=Strict, because the form POST is same-origin to this server. The
+# cross-site navigation that brings somebody to the login page only needs the
+# cookie to be STORED, which SameSite does not govern.
+module DoubleSubmitCsrf
+  extend ActiveSupport::Concern
+
+  included do
+    include ActionController::Cookies
+
+    # Rails' forgery protection stays ON, and this overrides only the part that
+    # needs a session -- how a request is judged verified. See verified_request?.
+    #
+    # Keeping it on rather than skipping it and checking per action is the
+    # safer structure: a new action added to a controller including this is
+    # protected by Rails' own before_action, where previously it would have had
+    # NO protection until somebody remembered to call the check. CodeQL flags
+    # the skip for that reason, and it was right to.
+    protect_from_forgery with: :exception
+
+    # The form needs it, and it is named distinctly rather than `csrf_token` so
+    # it cannot be confused with Rails' own helper -- which is tied to a session
+    # this server deliberately does not have.
+    helper_method :login_csrf_token
+  end
+
+  COOKIE_NAME = "identity_csrf"
+  FIELD_NAME = "authenticity_token"
+  TOKEN_BYTES = 32
+
+  private
+
+  # Issued on the GET that renders a form, and reused when one is already set so
+  # two tabs on the login page do not invalidate each other.
+  def login_csrf_token
+    @csrf_token ||= begin
+      existing = cookies[COOKIE_NAME]
+      token = existing.presence || SecureRandom.urlsafe_base64(TOKEN_BYTES)
+
+      cookies[COOKIE_NAME] = {
+        value: token,
+        httponly: true,
+        secure: !Rails.env.local?,
+        same_site: :strict,
+        path: "/sso"
+      }
+
+      token
+    end
+  end
+
+  # Rails calls this to decide whether a request is forgery-free, and normally
+  # answers it by comparing against a token in the session. This answers it with
+  # the double submit instead, so Rails' protection remains in force while
+  # needing no session.
+  #
+  # GET and HEAD are exempt here as they are in Rails: they change nothing, and
+  # the GET is what ISSUES the token.
+  def verified_request?
+    return true if request.get? || request.head?
+
+    submitted = params[FIELD_NAME].to_s
+    expected = cookies[COOKIE_NAME].to_s
+
+    # Compared in fixed time, like any secret. The value is not guessable, but a
+    # length-or-prefix difference is free to exploit when the attacker controls
+    # the guess. secure_compare already refuses differing lengths, so the blank
+    # guards are for clarity rather than correctness.
+    if expected.present? && submitted.present? &&
+       ActiveSupport::SecurityUtils.secure_compare(submitted, expected)
+      return true
+    end
+
+    # The honest cause -- somebody submitted a form this browser was not given --
+    # is logged, not explained to whoever did it.
+    Rails.logger.info("[identity] login POST refused: csrf")
+    false
+  end
+end
