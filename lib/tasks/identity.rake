@@ -243,4 +243,110 @@ namespace :identity do
     puts "# kid: #{OpenSSL::Digest::SHA256.hexdigest(key.public_key.to_der)[0, 32]}"
     puts "# Store as IDENTITY_SIGNING_KEY. Never commit it -- this repository is public."
   end
+
+  namespace :client do
+    desc "Set login page appearance tokens for an application"
+    task theme: :environment do
+      client = Client.find_by!(client_id: ENV.fetch("CLIENT_ID"))
+      apply_theme(client, "client #{client.client_id}")
+    end
+
+    desc "Clear an application's appearance tokens, falling back to its realm"
+    task clear_theme: :environment do
+      client = Client.find_by!(client_id: ENV.fetch("CLIENT_ID"))
+      client.update!(theme: {})
+      puts "Cleared theme for client #{client.client_id}; realm defaults now apply."
+    end
+
+    desc "Set an application's login page logo from a local image file"
+    task logo: :environment do
+      client = Client.find_by!(client_id: ENV.fetch("CLIENT_ID"))
+      apply_logo(client, "client #{client.client_id}")
+    end
+
+    desc "Remove an application's logo, falling back to its realm"
+    task clear_logo: :environment do
+      client = Client.find_by!(client_id: ENV.fetch("CLIENT_ID"))
+      client.update!(theme_logo_data: nil, theme_logo_content_type: nil)
+      puts "Cleared logo for client #{client.client_id}."
+    end
+
+    desc "Show the appearance tokens actually in force for an application"
+    task show_theme: :environment do
+      client = Client.find_by!(client_id: ENV.fetch("CLIENT_ID"))
+      resolved = Theme.resolve(client)
+      logo_owner = Theme.resolve_logo(client)
+
+      puts "Resolved theme for #{client.client_id} (client over realm over default):"
+      resolved.each { |key, value| puts format("  %-18s %s", key, value.nil? ? "(none)" : value) }
+      puts format("  %-18s %s", "logo",
+                  logo_owner ? "#{logo_owner.class.name.downcase}'s (#{logo_owner.theme_logo_content_type})" : "(none)")
+    end
+  end
+
+  namespace :realm do
+    desc "Set default login page appearance tokens for a realm"
+    task theme: :environment do
+      realm = Realm.find_by!(key: ENV.fetch("REALM"))
+      apply_theme(realm, "realm #{realm.key}")
+    end
+
+    desc "Set a realm's default login page logo from a local image file"
+    task logo: :environment do
+      realm = Realm.find_by!(key: ENV.fetch("REALM"))
+      apply_logo(realm, "realm #{realm.key}")
+    end
+  end
+
+  # Only the keys Theme knows are read from the environment, so a typo is a
+  # refusal rather than a silently ignored setting -- an operator who types
+  # PRIMARY_COLOUR should be told, not left wondering why nothing changed.
+  def apply_theme(record, label)
+    supplied = Theme::KEYS.to_h { |key| [ key, ENV[key.to_s.upcase] ] }.compact_blank
+
+    if supplied.empty?
+      abort "Nothing to set. Pass any of: #{Theme::KEYS.map { |k| k.to_s.upcase }.join(' ')}"
+    end
+
+    # Merged over what is already there, so setting one colour does not clear
+    # the rest.
+    record.theme = record.theme_tokens.merge(supplied.transform_keys(&:to_s))
+
+    unless record.save
+      abort "Refused: #{record.errors.full_messages.join('; ')}"
+    end
+
+    puts "Set #{supplied.keys.join(', ')} on #{label}."
+  end
+
+  def apply_logo(record, label)
+    path = ENV.fetch("LOGO")
+    abort "No such file: #{path}" unless File.file?(path)
+
+    data = File.binread(path)
+    content_type = ENV["CONTENT_TYPE"] || content_type_for(path)
+
+    record.theme_logo_data = data
+    record.theme_logo_content_type = content_type
+
+    unless record.save
+      abort "Refused: #{record.errors.full_messages.join('; ')}"
+    end
+
+    puts "Set logo on #{label} (#{content_type}, #{data.bytesize} bytes)."
+  end
+
+  # Derived from the extension, and deliberately NOT sniffed from the bytes.
+  # Only the types Theme accepts are mapped, so an svg or a pdf named .png is
+  # refused by the model rather than guessed at here.
+  def content_type_for(path)
+    case File.extname(path).downcase
+    when ".png" then "image/png"
+    when ".jpg", ".jpeg" then "image/jpeg"
+    when ".webp" then "image/webp"
+    else
+      abort "Cannot tell the type of #{path}. Pass CONTENT_TYPE=, one of " \
+            "#{Theme::LOGO_CONTENT_TYPES.join(', ')}."
+    end
+  end
 end

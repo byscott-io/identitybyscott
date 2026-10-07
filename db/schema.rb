@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_07_010001) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_07_120246) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -47,6 +47,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010001) do
     t.string "app_base_url"
     t.jsonb "url_templates", default: {}, null: false
     t.text "redirect_uris", default: "", null: false
+    t.jsonb "theme", default: {}, null: false
+    t.binary "theme_logo_data"
+    t.string "theme_logo_content_type"
     t.index ["client_id"], name: "index_clients_on_client_id", unique: true
     t.index ["realm_id", "name"], name: "index_clients_on_realm_id_and_name", unique: true
     t.index ["realm_id"], name: "index_clients_on_realm_id"
@@ -102,6 +105,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010001) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.boolean "sso_enabled", default: false, null: false
+    t.jsonb "theme", default: {}, null: false
+    t.binary "theme_logo_data"
+    t.string "theme_logo_content_type"
     t.index ["key"], name: "index_realms_on_key", unique: true
   end
 
@@ -117,10 +123,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010001) do
     t.datetime "revoked_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.uuid "sso_session_id"
     t.index ["client_id"], name: "index_sessions_on_client_id"
     t.index ["identity_id", "revoked_at"], name: "index_sessions_on_identity_id_and_revoked_at"
     t.index ["identity_id"], name: "index_sessions_on_identity_id"
     t.index ["refresh_token_digest"], name: "index_sessions_on_refresh_token_digest", unique: true
+    t.index ["sso_session_id"], name: "index_sessions_on_sso_session_id"
   end
 
   create_table "solid_cache_entries", force: :cascade do |t|
@@ -284,6 +292,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010001) do
     t.index ["key"], name: "index_solid_queue_semaphores_on_key", unique: true
   end
 
+  create_table "sso_bootstraps", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "identity_id", null: false
+    t.uuid "issuing_client_id", null: false
+    t.string "token_digest", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "consumed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.uuid "session_id"
+    t.index ["identity_id"], name: "index_sso_bootstraps_on_identity_id"
+    t.index ["issuing_client_id"], name: "index_sso_bootstraps_on_issuing_client_id"
+    t.index ["session_id"], name: "index_sso_bootstraps_on_session_id"
+    t.index ["token_digest"], name: "index_sso_bootstraps_on_token_digest", unique: true
+  end
+
   create_table "sso_sessions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "identity_id", null: false
     t.string "token_digest", null: false
@@ -309,6 +332,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010001) do
   add_foreign_key "identities", "realms"
   add_foreign_key "sessions", "clients"
   add_foreign_key "sessions", "identities"
+  add_foreign_key "sessions", "sso_sessions"
   add_foreign_key "solid_queue_batch_executions", "solid_queue_batches", column: "batch_id", on_delete: :cascade
   add_foreign_key "solid_queue_batch_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
@@ -317,5 +341,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010001) do
   add_foreign_key "solid_queue_ready_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_recurring_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "sso_bootstraps", "clients", column: "issuing_client_id"
+  add_foreign_key "sso_bootstraps", "identities"
+  add_foreign_key "sso_bootstraps", "sessions"
   add_foreign_key "sso_sessions", "identities"
 end
