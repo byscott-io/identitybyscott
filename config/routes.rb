@@ -12,6 +12,21 @@ Rails.application.routes.draw do
   get "/.well-known/jwks.json", to: "well_known#jwks", format: false
   get "/.well-known/openid-configuration", to: "well_known#openid_configuration", format: false
 
+  # Single sign-on. The ONE surface that sees a cookie, which is why it has its
+  # own path prefix: the cookie is scoped to /sso, so the browser never attaches
+  # it to anything under /api.
+  #
+  # client_id is a QUERY parameter here, unlike the credential endpoints below.
+  # The reason those need it in the path is CORS -- a preflight can see only the
+  # URL -- and there is no preflight on a top-level navigation, which is the
+  # only way this endpoint is ever reached. The property that matters is
+  # untouched: the realm still comes from a Client record looked up by this
+  # id, never from a request parameter. Discovery also has to publish ONE
+  # authorization_endpoint, which a per-client path could not be.
+  scope "sso", module: :sso do
+    get "authorize", to: "authorizations#show"
+  end
+
   # Credential endpoints, scoped by client_id in the PATH.
   #
   # In the path because a CORS preflight can see nothing else: it carries the

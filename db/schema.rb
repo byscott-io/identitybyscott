@@ -10,10 +10,30 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_07_004253) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_07_010001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
+
+  create_table "authorization_codes", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "identity_id", null: false
+    t.uuid "sso_session_id", null: false
+    t.uuid "authorized_client_id", null: false
+    t.string "code_digest", null: false
+    t.string "redirect_uri", null: false
+    t.string "code_challenge", null: false
+    t.string "code_challenge_method", default: "S256", null: false
+    t.string "nonce"
+    t.string "scope"
+    t.datetime "expires_at", null: false
+    t.datetime "consumed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["authorized_client_id"], name: "index_authorization_codes_on_authorized_client_id"
+    t.index ["code_digest"], name: "index_authorization_codes_on_code_digest", unique: true
+    t.index ["identity_id"], name: "index_authorization_codes_on_identity_id"
+    t.index ["sso_session_id"], name: "index_authorization_codes_on_sso_session_id"
+  end
 
   create_table "clients", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "realm_id", null: false
@@ -279,6 +299,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_004253) do
     t.index ["token_digest"], name: "index_sso_sessions_on_token_digest", unique: true
   end
 
+  add_foreign_key "authorization_codes", "clients", column: "authorized_client_id"
+  add_foreign_key "authorization_codes", "identities"
+  add_foreign_key "authorization_codes", "sso_sessions"
   add_foreign_key "clients", "realms"
   add_foreign_key "grants", "clients", column: "granted_client_id"
   add_foreign_key "grants", "identities"

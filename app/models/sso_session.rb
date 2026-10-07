@@ -27,6 +27,10 @@ class SsoSession < ApplicationRecord
 
   belongs_to :identity
 
+  # Codes die with the session they were minted from, so signing out reaches
+  # one already in flight rather than leaving it redeemable.
+  has_many :authorization_codes, dependent: :destroy
+
   validates :token_digest, presence: true, uniqueness: true
   validates :expires_at, presence: true
 

@@ -41,6 +41,20 @@ module SsoCookie
 
   private
 
+  # The session the presented cookie names, or nil.
+  #
+  # Only /authorize calls this, and only because the cookie's path scope means
+  # only /authorize ever receives the cookie. Nothing under app/controllers/api
+  # may call it -- a spec enforces that by grepping the directory.
+  #
+  # Realm-wide is not realm-agnostic: this returns a session for an identity in
+  # SOME realm, and the caller must check that realm against the client it is
+  # answering. SsoSession.authenticate deliberately takes no client for that
+  # reason.
+  def sso_session_from_cookie
+    SsoSession.authenticate(cookies[COOKIE_NAME])
+  end
+
   # Issues the realm-wide browser session, but only where the realm asked for
   # one. A realm with sso_enabled false never gets this cookie at all, which is
   # what makes the flag a real control rather than a hint.

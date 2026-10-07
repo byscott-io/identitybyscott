@@ -128,6 +128,21 @@ RSpec.describe "architectural rules" do
       expect(offenders).to be_empty,
                            "read request.path_parameters[:client_id] instead: #{offenders}"
     end
+
+    # The SSO surface is the one exception, and it is explicit rather than
+    # incidental.
+    #
+    # /authorize cannot take client_id from the path: there is no CORS preflight
+    # on a top-level navigation, and discovery publishes ONE
+    # authorization_endpoint, which a per-client path could not be. So it reads
+    # the query string -- but it names that source, rather than relying on
+    # `params` to merge path, query and body in the order it happens to.
+    it "reads it from the query string explicitly on the SSO surface" do
+      source = self.class.code_without_comments("app/controllers/sso/authorizations_controller.rb")
+
+      expect(source).to include("request.query_parameters")
+      expect(source).not_to match(/\bparams\[/)
+    end
   end
 
   describe "API only" do
