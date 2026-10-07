@@ -15,8 +15,7 @@ module Api
       identity = MfaChallenge.identity_for(params[:mfa_token], client: Current.client, realm: realm)
 
       unless accept_code?(identity, params[:code])
-        identity.increment_failed_attempts
-        identity.lock_access! if identity.failed_attempts >= Devise.maximum_attempts && !identity.access_locked?
+        CredentialCheck.register_failure(identity)
         return render json: { error: "Invalid code" }, status: :unauthorized
       end
 
