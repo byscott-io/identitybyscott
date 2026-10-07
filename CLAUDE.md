@@ -23,6 +23,12 @@ holds the CORS origin allowlist and the URLs this server builds emailed links
 from. Note `client_id` is a readable public **key** (`churchcare`), not a
 database id — the `id` column is an internal uuid that never leaves the server.
 
+**SsoSession** — a browser's claim to be an identity across a whole realm,
+held as a cookie. The widest-reaching credential here: a `Session` holds a
+refresh token redeemable at one application, this one speaks for every
+application in the realm. Hence a 12-hour life against a refresh token's 30
+days, and its own revocation. Only issued where `realms.sso_enabled`.
+
 **Grant** — permission for one identity to use one application. Existing in a
 realm is *not* permission to use the applications in it: authentication says who
 someone is, a grant says where they may take that. Signing up grants the
@@ -55,6 +61,8 @@ GET  /.well-known/openid-configuration
 | `app/services/mfa_challenge.rb` | the short-lived token between password and TOTP |
 | `app/models/identity.rb` | credentials, TOTP, backup codes, realm-scoped lookup |
 | `app/models/grant.rb` | which applications an identity may use |
+| `app/models/sso_session.rb` | the realm-wide browser session behind single sign-on |
+| `app/controllers/concerns/sso_cookie.rb` | the only cookie this server sets, and its attributes |
 | `app/controllers/concerns/issues_sessions.rb` | the one place a session is issued, and where grants are enforced |
 | `bin/check-public-safe` | refuses secrets and infrastructure detail; see the rules |
 
@@ -91,6 +99,9 @@ re-fetching. Drop the old key once the longest token lifetime has passed.
 
 ## What is not here, on purpose
 
-No hosted login page, no HTML, no sessions, no cookies. No OAuth provider for
-other people's APIs — each application keeps its own. No knowledge of
+No hosted login page, no HTML, no Rails session, no flash. No OAuth provider
+for other people's APIs — each application keeps its own. No knowledge of
 containers, memberships or roles.
+
+One cookie exists: the single sign-on session, path-scoped to `/sso` so it never
+reaches the API. See the "API only, and exactly one cookie" rule.

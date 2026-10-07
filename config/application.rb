@@ -40,5 +40,14 @@ module Identitybyscott
     # Middleware like session, flash, cookies can be added back manually.
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
+
+    # api_only omits the cookie middleware. It is added back for ONE cookie --
+    # the single sign-on session, see SsoCookie -- and the middleware is the
+    # whole of what comes back: no session store, no flash, no CSRF token.
+    #
+    # So there is still no ambient credential for the API. The cookie is path
+    # scoped to /sso, which means the browser never attaches it to a credential
+    # endpoint, and nothing in app/controllers/api reads it.
+    config.middleware.use ActionDispatch::Cookies
   end
 end

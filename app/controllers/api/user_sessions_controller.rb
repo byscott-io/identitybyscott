@@ -8,6 +8,8 @@ module Api
   # app I am looking at" and signing out of one said nothing about the others.
   # Here every session for the identity is one list, and one call ends them all.
   class UserSessionsController < AuthenticatedController
+    include SsoCookie
+
     def index
       sessions = current_identity.sessions.active.order(created_at: :desc)
 
@@ -32,6 +34,11 @@ module Api
       revoked = current_identity.sessions.active.to_a
       revoked.each(&:revoke!)
 
+      # Including the realm-wide browser session. Leaving it would make this
+      # endpoint a lie: every application token would be dead, and the next
+      # /authorize would silently mint new ones.
+      revoke_sso_sessions!(current_identity)
+
       render json: { revoked: revoked.length }
     end
 
@@ -45,6 +52,16 @@ module Api
     # client drops its copy either way.
     def sign_out
       current_session&.revoke!
+
+      # The realm session goes too, for the reason spelled out on
+      # revoke_sso_sessions!: if it survived, the application would bounce
+      # through /authorize and sign the person straight back in, and signing
+      # out would mean nothing.
+      #
+      # The other applications in the realm are NOT signed out -- each keeps
+      # its own refresh token. What is gone is the ability to reach a new one
+      # without a password.
+      revoke_sso_sessions!(current_identity)
 
       head :no_content
     end

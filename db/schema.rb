@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_07_002433) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_07_004253) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -264,6 +264,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_002433) do
     t.index ["key"], name: "index_solid_queue_semaphores_on_key", unique: true
   end
 
+  create_table "sso_sessions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "identity_id", null: false
+    t.string "token_digest", null: false
+    t.string "user_agent"
+    t.string "ip_address"
+    t.datetime "last_used_at"
+    t.datetime "expires_at", null: false
+    t.datetime "revoked_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["identity_id", "revoked_at"], name: "index_sso_sessions_on_identity_id_and_revoked_at"
+    t.index ["identity_id"], name: "index_sso_sessions_on_identity_id"
+    t.index ["token_digest"], name: "index_sso_sessions_on_token_digest", unique: true
+  end
+
   add_foreign_key "clients", "realms"
   add_foreign_key "grants", "clients", column: "granted_client_id"
   add_foreign_key "grants", "identities"
@@ -279,4 +294,5 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_002433) do
   add_foreign_key "solid_queue_ready_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_recurring_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "sso_sessions", "identities"
 end

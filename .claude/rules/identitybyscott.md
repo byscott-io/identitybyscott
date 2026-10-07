@@ -25,15 +25,46 @@ dependency list is a security property. The npm package is also unusable here �
 it is served from a private registry, and a public repository must never hold a
 token.
 
-## API only
+## API only, and exactly one cookie
 
-`config.api_only = true`, `ActionController::API`, and no cookie, session or
-flash middleware. The only views are mailer templates.
+`config.api_only = true`, `ActionController::API`, no session store and no
+flash. The only views are mailer templates.
 
-Do not add an HTML page, a session or a cookie. Applications render every form
-— sign in, sign up, password reset, MFA prompts — and post credentials here.
-Adding a session would also make CSRF protection necessary, which is currently
-unnecessary precisely because there is no ambient credential to forge.
+Do not add an HTML page, a Rails session or a flash. Applications render every
+form — sign in, sign up, password reset, MFA prompts — and post credentials
+here.
+
+**The one cookie is the single sign-on session**, and it is confined on purpose:
+
+- Set and cleared only in `SsoCookie`. One file, so its attributes are stated
+  once and cannot be weakened by a copy somewhere else.
+- `path=/sso`, which is the load-bearing part. The browser decides what to
+  attach by path, so the cookie is simply absent from every request under
+  `/api` — not by a convention this code has to remember, but because the
+  browser never sends it. **Nothing under `app/controllers/api` may read a
+  cookie**, and a spec enforces that by grepping the directory.
+- `HttpOnly`, `Secure` outside local, `SameSite=Lax`, no `Domain`. Lax is what
+  lets `/authorize` work at all — it still rides a top-level navigation — and
+  what stops the SSO surface being driven from a cross-site fetch or iframe.
+  Never `None`.
+- Opaque value, digest stored. Not a signed or encrypted cookie: a signed
+  cookie is self-contained and so stays valid until it expires whatever the
+  database says, and this credential has to be revocable.
+- Revoked by `sign_out` and by log-out-everywhere. A realm session that
+  survived sign-out would make sign-out decorative — the application would
+  bounce through `/authorize` and be signed straight back in.
+
+So the API still has **no ambient credential**, which is why it still needs no
+CSRF token: a request to `/api` cannot carry anything but a bearer token the
+caller attached deliberately.
+
+`/authorize` is where that changes, and it is the thing to get right when it
+lands. It will be reached by a top-level navigation carrying the cookie, so it
+is the first endpoint here with an ambient credential. Its protection is not a
+CSRF token but the shape of the flow: `SameSite=Lax`, a `redirect_uri` matched
+exactly against the client's registered list, and the `state` the application
+checks on the way back. It must stay a GET that mints a code for a registered
+URI and nothing else — any state change behind that cookie is CSRF-able.
 
 ## Email is unique PER REALM, never globally
 

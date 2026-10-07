@@ -7,6 +7,10 @@
 # there was no sessions list, no revocation, and no way to tell one device from
 # another. Every accepted credential now leaves a row.
 module IssuesSessions
+  extend ActiveSupport::Concern
+
+  include SsoCookie
+
   private
 
   # Whether this identity may use the calling application.
@@ -40,6 +44,15 @@ module IssuesSessions
       request: request,
       device_name: params[:device_name]
     )
+
+    # The realm-wide browser session, where the realm has asked for one.
+    #
+    # Here rather than in SessionsController because this method is reached by
+    # sign-in, sign-up AND mfa verification -- every path that accepts a
+    # credential and no other. In particular an MFA challenge does NOT come
+    # through here, so the cookie is never issued to someone who has given a
+    # password but not yet a second factor.
+    issue_sso_cookie!(identity)
 
     issuer = TokenIssuer.new(identity: identity, client: Current.client, session: session)
 
