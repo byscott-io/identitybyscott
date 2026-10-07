@@ -56,7 +56,7 @@ is the confusion that class already warns about.
 
 ```
 POST /api/apps/:client_id/auth/sign_in
-GET  /sso/bootstrap?token=…&return_to=…           (establishes the cookie)
+POST /sso/bootstrap   token, return_to            (establishes the cookie)
 GET  /sso/authorize?client_id=…&redirect_uri=…&state=…&code_challenge=…
 POST /api/apps/:client_id/auth/token          (redeems the code)
 GET  /.well-known/jwks.json
@@ -75,7 +75,9 @@ There is no hosted login page to prompt with, which is why
 
 The cookie is established at `/sso/bootstrap` and nowhere else — never in a
 reply to `sign_in`. See the rule; it is a browser constraint, not a preference,
-and it was got wrong once.
+and it was got wrong once. That endpoint is a **POST** whose `Origin` must be on
+the issuing client's allowlist: a GET carries no `Origin`, and without one a
+valid token for *any* identity could be planted in *any* browser from a link.
 
 The two halves of the code flow sit on different surfaces, decided by what a
 CORS preflight can see. `/authorize` is a top-level navigation, so no preflight happens and there is

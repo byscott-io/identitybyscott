@@ -53,10 +53,16 @@ RSpec.describe "the single sign-on cookie" do
     response.parsed_body
   end
 
-  # The real two-step: sign in for a token, then navigate to spend it.
-  def bootstrap(token: nil, to: nil)
+  # The real two-step: sign in for a token, then submit it as a top-level POST
+  # from a page on the application's own origin.
+  #
+  # A POST because only a POST carries an Origin header, which is what stops
+  # anyone who can make a browser follow a link from planting a session in it.
+  def bootstrap(token: nil, to: nil, from: "https://app.example.com")
     token ||= sign_in["sso_bootstrap_token"]
-    get "/sso/bootstrap", params: { token: token, return_to: to || return_to }
+    headers = from.nil? ? {} : { "Origin" => from }
+    post "/sso/bootstrap", params: { token: token, return_to: to || return_to },
+                           headers: headers
   end
 
   def set_cookie_header
@@ -135,7 +141,7 @@ RSpec.describe "the single sign-on cookie" do
     it "establishes the cookie and sends the browser back" do
       bootstrap
 
-      expect(response).to have_http_status(:found)
+      expect(response).to have_http_status(:see_other)
       expect(response.headers["Location"]).to eq(return_to)
       expect(set_cookie_header).to be_present
       expect(identity.sso_sessions.active.count).to eq(1)
@@ -189,6 +195,84 @@ RSpec.describe "the single sign-on cookie" do
         expect(response).to have_http_status(:bad_request)
         expect(response.parsed_body).to eq({ "error" => "invalid_request" })
         expect(response.headers["Location"]).to be_nil
+      end
+
+      # THE login-CSRF case, and the reason this endpoint is a POST.
+      #
+      # An attacker signs in to their OWN account server-side -- where the Origin
+      # check deliberately does not apply, a caller without an Origin not being a
+      # browser -- and gets a valid bootstrap token for their own identity. If
+      # they could then make a victim's browser spend it, that browser would hold
+      # a twelve-hour cookie for the ATTACKER'S identity: silently signed in to
+      # real applications as somebody else, with everything typed afterwards
+      # going into the attacker's account.
+      #
+      # The Origin header is what closes it. A browser attaches one to a
+      # top-level POST, script cannot forge it, and a referrer policy cannot
+      # suppress it -- so the submission has to come from a page on an origin the
+      # issuing application registered.
+      it "refuses a token presented from an origin the application never registered" do
+        token = sign_in["sso_bootstrap_token"]
+
+        bootstrap(token: token, from: "https://attacker.test")
+
+        expect_refused
+      end
+
+      it "plants no session when the origin is not allowed" do
+        token = sign_in["sso_bootstrap_token"]
+
+        bootstrap(token: token, from: "https://attacker.test")
+
+        expect(set_cookie_header).to be_nil
+        expect(SsoSession.count).to eq(0)
+      end
+
+      # A GET navigation carries no Origin at all, which is exactly why this is
+      # not reachable by one. Routing must not quietly answer a link.
+      it "is not reachable by a link" do
+        token = sign_in["sso_bootstrap_token"]
+
+        get "/sso/bootstrap", params: { token: token, return_to: return_to }
+
+        expect(response).to have_http_status(:not_found)
+        expect(response.headers["Location"]).to be_nil
+        expect(SsoSession.count).to eq(0)
+      end
+
+      # A missing Origin is refused rather than treated as a non-browser caller.
+      # Everywhere else that reasoning is right -- a server has no Origin and is
+      # constrained by its credentials instead -- but here the whole question is
+      # WHICH BROWSER is about to be given a session, and a request that will not
+      # say is not one to answer.
+      it "refuses a submission with no origin at all" do
+        token = sign_in["sso_bootstrap_token"]
+
+        bootstrap(token: token, from: nil)
+
+        expect_refused
+        expect(SsoSession.count).to eq(0)
+      end
+
+      # Another application in the same realm is still not this token's
+      # application. The allowlist consulted is the issuing client's.
+      it "refuses an origin belonging to a different application in the realm" do
+        create(:client, realm: realm, allowed_origins: "https://sibling.example.com",
+                        redirect_uris: return_to)
+        token = sign_in["sso_bootstrap_token"]
+
+        bootstrap(token: token, from: "https://sibling.example.com")
+
+        expect_refused
+      end
+
+      it "spends the token even when the origin is refused" do
+        token = sign_in["sso_bootstrap_token"]
+        bootstrap(token: token, from: "https://attacker.test")
+
+        bootstrap(token: token)
+
+        expect_refused
       end
 
       it "refuses an unknown token" do
@@ -328,7 +412,9 @@ RSpec.describe "the single sign-on cookie" do
   describe "revocation" do
     def bearer_and_cookie
       body = sign_in
-      get "/sso/bootstrap", params: { token: body["sso_bootstrap_token"], return_to: return_to }
+      post "/sso/bootstrap",
+           params: { token: body["sso_bootstrap_token"], return_to: return_to },
+           headers: origin
       { "Authorization" => "Bearer #{body['access_token']}" }.merge(origin)
     end
 

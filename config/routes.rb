@@ -29,7 +29,12 @@ Rails.application.routes.draw do
     # Establishes the cookie during a top-level navigation, because this server
     # is a third party to every application it serves and a cookie set in reply
     # to a cross-site request is refused or partitioned. See SsoBootstrap.
-    get "bootstrap", to: "bootstraps#show"
+    #
+    # POST, not GET, and that is a security requirement rather than REST
+    # tidiness: a browser sends an Origin header on a top-level POST and sends
+    # none on a GET navigation. Without it, anyone who could make a browser
+    # follow a link could plant a session in it. See BootstrapsController.
+    post "bootstrap", to: "bootstraps#create"
   end
 
   # Credential endpoints, scoped by client_id in the PATH.

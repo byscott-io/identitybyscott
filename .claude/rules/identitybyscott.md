@@ -49,7 +49,20 @@ here.
   and silently fails to do its job. A top-level navigation makes this server the
   top-level site, so the cookie is first-party and shared across the realm.
   `sign_in` hands back a one-use `sso_bootstrap_token` and the application
-  navigates with it. This was got wrong once already.
+  submits it. This was got wrong once already.
+- **That submission is a POST, and the `Origin` check on it is not optional.**
+  The token cannot say which browser *should* receive the session: an attacker
+  can sign in to their own account server-side — where the Origin check
+  deliberately does not apply, a caller without an Origin not being a browser —
+  and get a valid token for their own identity. As a GET, that token in a link
+  would give any victim who followed it a twelve-hour cookie for the
+  *attacker's* identity, silently signed in to real applications as somebody
+  else. A browser attaches `Origin` to a top-level POST and none to a GET
+  navigation, script cannot forge it and a referrer policy cannot suppress it,
+  so the submission must come from a page on an origin the ISSUING application
+  registered. Never make this a GET, never accept a missing `Origin` here, and
+  never widen the check to any client's allowlist. Residual risk, stated: an XSS
+  on a registered origin can still plant a session.
 - `path=/sso`, which is the load-bearing part. The browser decides what to
   attach by path, so the cookie is simply absent from every request under
   `/api` — not by a convention this code has to remember, but because the
