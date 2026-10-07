@@ -12,8 +12,24 @@ module Api
   # impossible otherwise.
   class BaseController < ApplicationController
     before_action :resolve_client!
+
+    # BEFORE the origin check and before any rate limiter, not after the
+    # action.
+    #
+    # These were an after_action, and Rails does not run after_action
+    # callbacks when a before_action HALTS the chain -- which is exactly what
+    # `rate_limit` does when it renders 429. So every rate-limited response
+    # went out with no Access-Control-Allow-Origin, and a browser reported it
+    # as a CORS failure rather than as the rate limit it was. The JSON body
+    # added for precisely that complaint was never readable by the caller it
+    # was added for.
+    #
+    # Here it covers every halt after the client is known: the rate limiters,
+    # and anything added later that renders from a filter. An origin that is
+    # NOT allowed still gets nothing, because this only ever echoes one
+    # already on that client's allowlist.
+    before_action :apply_cors_headers
     before_action :enforce_origin!
-    after_action :apply_cors_headers
 
     private
 

@@ -100,3 +100,48 @@ RSpec.describe "CORS preflight" do
     end
   end
 end
+
+# A response produced by a HALTED filter chain must still carry the CORS header.
+#
+# This was broken in production and reported as "CORS error trying to log in".
+# apply_cors_headers was an after_action, and Rails does not run after_action
+# callbacks when a before_action halts -- which is exactly what `rate_limit`
+# does when it renders 429. So every rate-limited response went out with no
+# Access-Control-Allow-Origin, and the browser reported a CORS failure instead
+# of the rate limit it actually was. The JSON body added for that very
+# complaint was never readable.
+#
+# The rate limiters themselves cannot fire in test -- `store:` defaults to
+# cache_store, evaluated when the class is defined, and the test environment is
+# :null_store, so increment returns nil and the limit is never reached. So this
+# asserts the MECHANISM: a filter that halts after the CORS filter still leaves
+# the header on the response.
+RSpec.describe "CORS on a halted filter chain" do
+  let(:client) { create(:client, allowed_origins: "https://app.example.com") }
+
+  it "keeps the header when a later filter renders instead of the action" do
+    allow_any_instance_of(Api::SessionsController).to receive(:enforce_origin!) do |controller|
+      controller.render json: { error: "Too many requests" }, status: :too_many_requests
+    end
+
+    post "/api/apps/#{client.client_id}/auth/sign_in",
+         params: { email: "a@b.c", password: "x" },
+         headers: { "Origin" => "https://app.example.com" }
+
+    expect(response).to have_http_status(:too_many_requests)
+    expect(response.headers["Access-Control-Allow-Origin"]).to eq("https://app.example.com")
+  end
+
+  # Guards the ordering that makes the above work. If apply_cors_headers goes
+  # back to being an after_action, or moves after enforce_origin!, the header
+  # disappears from halted responses again and nothing else would notice.
+  it "applies the headers as a before_action, ahead of the origin check" do
+    names = Api::BaseController._process_action_callbacks
+                              .select { |c| c.kind == :before }
+                              .map(&:filter)
+
+    expect(names).to include(:apply_cors_headers)
+    expect(names.index(:apply_cors_headers)).to be > names.index(:resolve_client!)
+    expect(names.index(:apply_cors_headers)).to be < names.index(:enforce_origin!)
+  end
+end
