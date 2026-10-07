@@ -6,6 +6,8 @@
 # and the same email address is a DIFFERENT identity in each -- different
 # password, different MFA, different sub.
 class Realm < ApplicationRecord
+  include Themed
+
   has_many :identities, dependent: :restrict_with_error
   has_many :clients, dependent: :restrict_with_error
 

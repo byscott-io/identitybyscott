@@ -19,6 +19,8 @@
 # matched against it. Being tidier here would mean being non-standard at the one
 # boundary where standards earn their keep.
 class Client < ApplicationRecord
+  include Themed
+
   belongs_to :realm
   has_many :sessions, dependent: :destroy
   has_many :grants, foreign_key: :granted_client_id, dependent: :destroy, inverse_of: :client
