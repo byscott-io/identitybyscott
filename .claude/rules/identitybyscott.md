@@ -90,16 +90,24 @@ The token carries a `realm` claim so an application can *check* its own
 registration. That direction only: this server states the realm, the
 application may verify it.
 
-## client_id comes from the PATH, via `request.path_parameters`
+## client_id is read from a NAMED source, never from `params`
 
 Not from `params`, which merges path, query and body. Rails does give the path
 precedence, so `params` happens to be correct — but a security property must not
 rest on an implicit merge order.
 
-It must also stay a path segment. A CORS preflight carries only the `Origin`,
-the method and the *names* of requested headers — no body, no header values — so
-the URL is the only part of a credential request a preflight can see. Move
-`client_id` anywhere else and per-client origin checking becomes impossible.
+On the credential endpoints it must also stay a path segment. A CORS preflight
+carries only the `Origin`, the method and the *names* of requested headers — no
+body, no header values — so the URL is the only part of a credential request a
+preflight can see. Move `client_id` anywhere else and per-client origin checking
+becomes impossible.
+
+`/sso/authorize` is the exception, and reads `request.query_parameters`. Neither
+half of the reason above applies to it: there is no preflight on a top-level
+navigation, and it has no origin check at all, while discovery must publish ONE
+`authorization_endpoint`, which a per-client path could not be. The principle
+survives the exception — the source is still named, so nothing rests on
+`params`' merge order — and an architecture spec asserts both halves.
 
 ## Failure responses are uniform, deliberately
 

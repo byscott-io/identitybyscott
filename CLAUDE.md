@@ -29,6 +29,12 @@ refresh token redeemable at one application, this one speaks for every
 application in the realm. Hence a 12-hour life against a refresh token's 30
 days, and its own revocation. Only issued where `realms.sso_enabled`.
 
+**AuthorizationCode** — the short-lived, single-use code `/sso/authorize` hands
+back through a redirect, exchanged once for tokens. The most exposed credential
+here, because it travels in a URL: one minute, consumed atomically on first use,
+and bound to the client, the exact `redirect_uri`, a PKCE challenge and the
+browser session it came from. Seeing one is not enough to redeem it.
+
 **Grant** — permission for one identity to use one application. Existing in a
 realm is *not* permission to use the applications in it: authentication says who
 someone is, a grant says where they may take that. Signing up grants the
@@ -43,11 +49,20 @@ is the confusion that class already warns about.
 
 ```
 POST /api/apps/:client_id/auth/sign_in
+GET  /sso/authorize?client_id=…&redirect_uri=…&state=…&code_challenge=…
 GET  /.well-known/jwks.json
 GET  /.well-known/openid-configuration
 ```
 
-`client_id` is a path segment because a CORS preflight can see nothing else.
+On the credential endpoints `client_id` is a path segment because a CORS
+preflight can see nothing else. `/sso/authorize` takes it from the query string
+instead — no preflight reaches a top-level navigation, and discovery publishes
+one `authorization_endpoint` — but still from a named source, never `params`.
+
+`/sso/authorize` is silent or nothing: it answers from an existing realm session
+or returns `login_required` for the application to handle with its own form.
+There is no hosted login page to prompt with, which is why
+`prompt_values_supported` is only `none` and `login`.
 
 ## Where things are
 
@@ -62,6 +77,8 @@ GET  /.well-known/openid-configuration
 | `app/models/identity.rb` | credentials, TOTP, backup codes, realm-scoped lookup |
 | `app/models/grant.rb` | which applications an identity may use |
 | `app/models/sso_session.rb` | the realm-wide browser session behind single sign-on |
+| `app/models/authorization_code.rb` | the redirect-borne code, and the rules for consuming it |
+| `app/controllers/sso/authorizations_controller.rb` | `/sso/authorize`; the validation ORDER is the security property |
 | `app/controllers/concerns/sso_cookie.rb` | the only cookie this server sets, and its attributes |
 | `app/controllers/concerns/issues_sessions.rb` | the one place a session is issued, and where grants are enforced |
 | `bin/check-public-safe` | refuses secrets and infrastructure detail; see the rules |
