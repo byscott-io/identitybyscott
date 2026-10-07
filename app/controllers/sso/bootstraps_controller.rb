@@ -82,7 +82,7 @@ module Sso
       # that looks successful.
       return render_refused("sso not enabled for realm") unless bootstrap.identity.realm.sso?
 
-      issue_sso_cookie!(bootstrap.identity)
+      issue_sso_cookie!(bootstrap.identity, link_session: bootstrap.session)
 
       redirect_to return_to, allow_other_host: true, status: :see_other
     end

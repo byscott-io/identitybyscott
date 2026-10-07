@@ -28,6 +28,9 @@ held as a cookie. The widest-reaching credential here: a `Session` holds a
 refresh token redeemable at one application, this one speaks for every
 application in the realm. Hence a 12-hour life against a refresh token's 30
 days, and its own revocation. Only issued where `realms.sso_enabled`.
+`sessions.sso_session_id` records which browser an application session came
+from, so signing out of one application revokes that browser's realm session
+rather than every one the identity has.
 
 **AuthorizationCode** — the short-lived, single-use code `/sso/authorize` hands
 back through a redirect, exchanged once for tokens. The most exposed credential

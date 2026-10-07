@@ -11,6 +11,7 @@ class Session < ApplicationRecord
 
   belongs_to :identity
   belongs_to :client
+  belongs_to :sso_session, optional: true
 
   validates :refresh_token_digest, presence: true, uniqueness: true
   validates :expires_at, presence: true
@@ -23,7 +24,12 @@ class Session < ApplicationRecord
     # Mints a session and returns it with the RAW refresh token, which exists
     # only in this return value and in the response built from it. Nothing can
     # read it back afterwards -- only the digest is stored.
-    def issue!(identity:, client:, request: nil, device_name: nil)
+    # sso_session links this session to the browser-wide realm session it came
+    # from, where there is one. It is what lets signing out of ONE application
+    # revoke the right realm session instead of every one the identity has --
+    # the sign-out request cannot see the cookie, so this is the only thing that
+    # identifies the browser.
+    def issue!(identity:, client:, request: nil, device_name: nil, sso_session: nil)
       raw = SecureRandom.urlsafe_base64(32)
 
       session = create!(
@@ -34,7 +40,8 @@ class Session < ApplicationRecord
         user_agent: request&.user_agent,
         ip_address: request&.remote_ip,
         last_used_at: Time.current,
-        expires_at: REFRESH_TOKEN_TTL.from_now
+        expires_at: REFRESH_TOKEN_TTL.from_now,
+        sso_session: sso_session
       )
 
       [ session, raw ]

@@ -25,18 +25,27 @@ class SsoBootstrap < ApplicationRecord
   belongs_to :identity
   belongs_to :client, foreign_key: :issuing_client_id, inverse_of: false
 
+  # The sign-in this token was issued alongside. Carried so the navigation can
+  # link that session to the realm session it establishes -- the realm session
+  # does not exist yet at sign-in, so the link cannot be made there.
+  #
+  # Optional: a token issued before this existed has none, and signing out then
+  # simply revokes nothing rather than everything.
+  belongs_to :session, optional: true
+
   validates :token_digest, presence: true, uniqueness: true
   validates :expires_at, presence: true
 
   scope :live, -> { where(consumed_at: nil).where(expires_at: Time.current..) }
 
   class << self
-    def issue!(identity:, client:)
+    def issue!(identity:, client:, session: nil)
       raw = SecureRandom.urlsafe_base64(32)
 
       bootstrap = create!(
         identity: identity,
         client: client,
+        session: session,
         token_digest: digest(raw),
         expires_at: BOOTSTRAP_TTL.from_now
       )

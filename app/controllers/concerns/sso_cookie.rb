@@ -58,10 +58,16 @@ module SsoCookie
   # Issues the realm-wide browser session, but only where the realm asked for
   # one. A realm with sso_enabled false never gets this cookie at all, which is
   # what makes the flag a real control rather than a hint.
-  def issue_sso_cookie!(identity)
+  def issue_sso_cookie!(identity, link_session: nil)
     return unless identity.realm.sso?
 
-    _session, raw = SsoSession.issue!(identity: identity, request: request)
+    sso_session, raw = SsoSession.issue!(identity: identity, request: request)
+
+    # The sign-in that led here, now that the realm session it belongs to
+    # exists. This is what lets that application's later sign-out revoke THIS
+    # browser's realm session rather than all of them -- a sign-out arrives at
+    # /api and cannot see the cookie, so the link is the only identification.
+    link_session&.update!(sso_session: sso_session)
 
     cookies[COOKIE_NAME] = sso_cookie_attributes.merge(
       value: raw,
@@ -73,21 +79,28 @@ module SsoCookie
     )
   end
 
-  # Revokes every live SSO session for this identity and clears the cookie.
+  # Revokes THIS browser's realm session and clears the cookie.
   #
-  # Coarse on purpose, for now: the cookie is not readable here -- a sign-out
-  # arrives as an XHR to /api, which this cookie's path keeps it away from -- so
-  # the row for THIS browser cannot be singled out. Revoking all of them signs
-  # the identity out of the realm everywhere, including on another device.
+  # The realm session has to go, or signing out of an application would be
+  # decorative: it would redirect to /authorize, the cookie would still be good,
+  # and the person would be signed straight back in without a password.
   #
-  # That errs toward asking for a password, which is the right direction to err,
-  # and it can be narrowed once /authorize can match the presented cookie to its
-  # row. The alternative -- leaving the realm session alive -- would make
-  # signing out of an application decorative: the application would redirect to
-  # /authorize, the cookie would still be good, and the person would be silently
-  # signed straight back in.
-  def revoke_sso_sessions!(identity)
-    revoked = identity.sso_sessions.active.to_a
+  # But only this browser's. A sign-out arrives at /api and cannot see the
+  # cookie -- the path scope keeps it away deliberately -- so the browser is
+  # identified by the link recorded when the session was created, at the
+  # bootstrap navigation or the code exchange. Before that link existed this
+  # revoked every realm session the identity had, which signed them out on their
+  # phone because they signed out on their laptop.
+  #
+  # Other applications on this browser keep their refresh tokens: the realm
+  # session is nullified from them, not cascaded. What is gone is reaching a NEW
+  # application without a password.
+  #
+  # Nothing to revoke is a normal outcome, not a failure -- a realm without
+  # single sign-on, or a session predating the link. Signing out is idempotent
+  # and the caller gets the same answer.
+  def revoke_sso_session!(session)
+    revoked = [ session&.sso_session ].compact.select(&:active?)
     revoked.each(&:revoke!)
 
     # response.delete_cookie, NOT cookies.delete.
@@ -101,6 +114,17 @@ module SsoCookie
     # Writing the header directly clears it regardless. The path has to match
     # the one it was set with, or the browser keeps the original and the
     # deletion only shadows it at a different path.
+    response.delete_cookie(COOKIE_NAME, path: COOKIE_PATH)
+
+    revoked.length
+  end
+
+  # Log out EVERYWHERE, which is the one case that should reach every browser.
+  # Named separately so the narrow case above cannot be widened by accident.
+  def revoke_all_sso_sessions!(identity)
+    revoked = identity.sso_sessions.active.to_a
+    revoked.each(&:revoke!)
+
     response.delete_cookie(COOKIE_NAME, path: COOKIE_PATH)
 
     revoked.length

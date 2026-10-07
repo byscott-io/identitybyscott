@@ -410,12 +410,139 @@ RSpec.describe "the single sign-on cookie" do
   end
 
   describe "revocation" do
+    # One full browser cycle: sign in, then spend the bootstrap token. Returns
+    # the headers that browser would use, and leaves its realm session linked to
+    # the session the token was issued for.
     def bearer_and_cookie
       body = sign_in
       post "/sso/bootstrap",
            params: { token: body["sso_bootstrap_token"], return_to: return_to },
            headers: origin
       { "Authorization" => "Bearer #{body['access_token']}" }.merge(origin)
+    end
+
+    # The link is what makes a narrow sign-out possible at all: a sign-out
+    # arrives at /api, where the cookie's path scope keeps it from ever being
+    # seen, so the session being revoked is the only thing that identifies the
+    # browser.
+    describe "the link between a session and its realm session" do
+      it "is recorded when the bootstrap navigation establishes the cookie" do
+        bearer_and_cookie
+
+        session = identity.sessions.sole
+        expect(session.sso_session).to eq(identity.sso_sessions.active.sole)
+      end
+
+      it "is absent for a realm without single sign-on" do
+        other_realm = create(:realm, require_email_confirmation: false, sso_enabled: false)
+        other_client = create(:client, realm: other_realm, allowed_origins: "https://app.example.com")
+        person = create(:identity, realm: other_realm, signup_client: other_client,
+                                   password: password, confirmed_at: Time.current)
+
+        post "/api/apps/#{other_client.client_id}/auth/sign_in",
+             params: { email: person.email, password: password }, headers: origin(other_client)
+
+        expect(person.sessions.sole.sso_session).to be_nil
+      end
+    end
+
+    # THE property this exists for. Signing out on one browser must not sign
+    # the person out on their phone.
+    describe "signing out of one application on one browser" do
+      it "leaves another browser's realm session alone" do
+        first = bearer_and_cookie
+        bearer_and_cookie
+        expect(identity.sso_sessions.active.count).to eq(2)
+
+        delete "/api/apps/#{client.client_id}/auth/sign_out", headers: first
+
+        expect(response).to have_http_status(:no_content)
+        expect(identity.sso_sessions.active.count).to eq(1)
+      end
+
+      it "revokes the one belonging to the browser that asked" do
+        first = bearer_and_cookie
+        mine = identity.sessions.order(:created_at).first.sso_session
+        bearer_and_cookie
+
+        delete "/api/apps/#{client.client_id}/auth/sign_out", headers: first
+
+        expect(mine.reload).to be_revoked
+      end
+
+      # Proven by using the other browser's cookie rather than by inspecting a
+      # row: after the first browser signs out, the second still gets a code
+      # from /authorize, which is what "still signed in" actually means.
+      #
+      # The second realm session is created directly so the spec holds its raw
+      # cookie value, and linked to its own application session the way the
+      # bootstrap navigation would. Going through the navigation twice would
+      # share one cookie jar between the two simulated browsers, and the first
+      # sign-out's clearing header would wipe the second's cookie -- an artefact
+      # of the test, not of the server.
+      it "leaves the other browser still able to authorize" do
+        first = bearer_and_cookie
+
+        other_realm_session, other_cookie = SsoSession.issue!(identity: identity)
+        other_session, = Session.issue!(identity: identity, client: client,
+                                        sso_session: other_realm_session)
+        expect(other_session.sso_session).to eq(other_realm_session)
+
+        delete "/api/apps/#{client.client_id}/auth/sign_out", headers: first
+        expect(response).to have_http_status(:no_content)
+
+        verifier = SecureRandom.urlsafe_base64(64)
+        challenge = Base64.urlsafe_encode64(
+          OpenSSL::Digest::SHA256.digest(verifier), padding: false
+        )
+        cookies[SsoCookie::COOKIE_NAME] = other_cookie
+        get "/sso/authorize", params: {
+          client_id: client.client_id, redirect_uri: return_to, response_type: "code",
+          state: "s", code_challenge: challenge, code_challenge_method: "S256"
+        }
+
+        query = URI.decode_www_form(URI.parse(response.headers["Location"]).query).to_h
+        expect(query["code"]).to be_present
+        expect(query).not_to have_key("error")
+      end
+
+      # Revoking is an update, so it cannot cascade -- which is the point: the
+      # other applications on this browser keep their refresh tokens and stay
+      # signed in, they just cannot reach a NEW one without a password.
+      #
+      # This asserts that outcome, not the association's dependent: option --
+      # that only fires on destroy and is covered in the model spec.
+      it "leaves the application sessions in place" do
+        headers = bearer_and_cookie
+
+        expect { delete "/api/apps/#{client.client_id}/auth/sign_out", headers: headers }
+          .not_to change(Session, :count)
+      end
+
+      # A normal outcome, not a failure: a realm without single sign-on, or a
+      # session predating the link.
+      it "revokes nothing, and still succeeds, when there is no link" do
+        headers = bearer_and_cookie
+        identity.sessions.update_all(sso_session_id: nil)
+
+        delete "/api/apps/#{client.client_id}/auth/sign_out", headers: headers
+
+        expect(response).to have_http_status(:no_content)
+        expect(identity.sso_sessions.active.count).to eq(1)
+      end
+    end
+
+    # The one case where reaching every browser IS the point.
+    describe "logging out everywhere" do
+      it "revokes every browser's realm session" do
+        first = bearer_and_cookie
+        bearer_and_cookie
+        expect(identity.sso_sessions.active.count).to eq(2)
+
+        delete "/api/apps/#{client.client_id}/auth/sessions", headers: first
+
+        expect(identity.sso_sessions.active.count).to eq(0)
+      end
     end
 
     # Otherwise signing out would be decorative: the application would bounce

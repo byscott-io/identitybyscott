@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_07_013021) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_07_013809) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -117,10 +117,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_013021) do
     t.datetime "revoked_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.uuid "sso_session_id"
     t.index ["client_id"], name: "index_sessions_on_client_id"
     t.index ["identity_id", "revoked_at"], name: "index_sessions_on_identity_id_and_revoked_at"
     t.index ["identity_id"], name: "index_sessions_on_identity_id"
     t.index ["refresh_token_digest"], name: "index_sessions_on_refresh_token_digest", unique: true
+    t.index ["sso_session_id"], name: "index_sessions_on_sso_session_id"
   end
 
   create_table "solid_cache_entries", force: :cascade do |t|
@@ -292,8 +294,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_013021) do
     t.datetime "consumed_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.uuid "session_id"
     t.index ["identity_id"], name: "index_sso_bootstraps_on_identity_id"
     t.index ["issuing_client_id"], name: "index_sso_bootstraps_on_issuing_client_id"
+    t.index ["session_id"], name: "index_sso_bootstraps_on_session_id"
     t.index ["token_digest"], name: "index_sso_bootstraps_on_token_digest", unique: true
   end
 
@@ -322,6 +326,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_013021) do
   add_foreign_key "identities", "realms"
   add_foreign_key "sessions", "clients"
   add_foreign_key "sessions", "identities"
+  add_foreign_key "sessions", "sso_sessions"
   add_foreign_key "solid_queue_batch_executions", "solid_queue_batches", column: "batch_id", on_delete: :cascade
   add_foreign_key "solid_queue_batch_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
@@ -332,5 +337,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_013021) do
   add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "sso_bootstraps", "clients", column: "issuing_client_id"
   add_foreign_key "sso_bootstraps", "identities"
+  add_foreign_key "sso_bootstraps", "sessions"
   add_foreign_key "sso_sessions", "identities"
 end

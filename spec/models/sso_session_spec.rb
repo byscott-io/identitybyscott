@@ -125,5 +125,25 @@ RSpec.describe SsoSession do
 
       expect { identity.destroy! }.to change(described_class, :count).by(-1)
     end
+
+    # dependent: :nullify, not :destroy.
+    #
+    # An application's refresh token is its own credential and must outlive the
+    # browser session that happened to introduce it. Destroying this row is not
+    # a way to sign anyone out of the applications they are already using -- the
+    # realm session only governs reaching a NEW one silently.
+    #
+    # Worth its own spec because revocation, which is the normal path, is an
+    # UPDATE and so cannot cascade whatever this option says. Only destroying
+    # the row can, and nothing noticed when the option was flipped.
+    it "releases its application sessions rather than destroying them" do
+      session = described_class.issue!(identity: identity).first
+      app_session, = Session.issue!(
+        identity: identity, client: identity.signup_client, sso_session: session
+      )
+
+      expect { session.destroy! }.not_to change(Session, :count)
+      expect(app_session.reload.sso_session).to be_nil
+    end
   end
 end

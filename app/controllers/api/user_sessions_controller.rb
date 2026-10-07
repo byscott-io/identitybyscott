@@ -34,10 +34,11 @@ module Api
       revoked = current_identity.sessions.active.to_a
       revoked.each(&:revoke!)
 
-      # Including the realm-wide browser session. Leaving it would make this
-      # endpoint a lie: every application token would be dead, and the next
-      # /authorize would silently mint new ones.
-      revoke_sso_sessions!(current_identity)
+      # Every realm session, on every browser -- which is what "everywhere"
+      # means and the one case where the wide version is correct. Leaving them
+      # would make this endpoint a lie: every application token would be dead
+      # and the next /authorize would silently mint new ones.
+      revoke_all_sso_sessions!(current_identity)
 
       render json: { revoked: revoked.length }
     end
@@ -53,15 +54,15 @@ module Api
     def sign_out
       current_session&.revoke!
 
-      # The realm session goes too, for the reason spelled out on
-      # revoke_sso_sessions!: if it survived, the application would bounce
-      # through /authorize and sign the person straight back in, and signing
-      # out would mean nothing.
+      # THIS browser's realm session goes too. If it survived, the application
+      # would bounce through /authorize and sign the person straight back in,
+      # and signing out would mean nothing.
       #
-      # The other applications in the realm are NOT signed out -- each keeps
-      # its own refresh token. What is gone is the ability to reach a new one
-      # without a password.
-      revoke_sso_sessions!(current_identity)
+      # Identified through the session being revoked rather than by the cookie,
+      # which never reaches /api. Other browsers are untouched, and the other
+      # applications on this one keep their refresh tokens -- what is gone is
+      # reaching a NEW application without a password.
+      revoke_sso_session!(current_session)
 
       head :no_content
     end

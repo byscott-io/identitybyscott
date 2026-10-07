@@ -72,7 +72,12 @@ module Api
       # twelve-hour absolute lifetime into a sliding one: every application a
       # person opened would push the expiry out again, so the bound window that
       # lifetime was chosen to provide would never close for an active browser.
-      render json: session_response(code.identity, sso_bootstrap: false)
+      # sso_session: the realm session the code came from, so signing out of
+      # THIS application later revokes that browser's realm session and not
+      # every one the identity has.
+      render json: session_response(
+        code.identity, sso_bootstrap: false, sso_session: code.sso_session
+      )
     end
 
     private

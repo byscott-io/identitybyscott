@@ -41,12 +41,18 @@ module IssuesSessions
   # the code -- so handing it a way to establish another is pointless, and
   # re-establishing one would turn SsoSession's absolute twelve-hour lifetime
   # into a sliding one, which is the opposite of why that number was chosen.
-  def session_response(identity, sso_bootstrap: true)
+  def session_response(identity, sso_bootstrap: true, sso_session: nil)
     session, refresh_token = Session.issue!(
       identity: identity,
       client: Current.client,
       request: request,
-      device_name: params[:device_name]
+      device_name: params[:device_name],
+
+      # Set by the code exchange, which knows the realm session the code was
+      # minted from. A password sign-in has none yet -- the realm session is
+      # created by the bootstrap navigation that follows -- so the bootstrap
+      # carries this session forward and makes the link there instead.
+      sso_session: sso_session
     )
 
     issuer = TokenIssuer.new(identity: identity, client: Current.client, session: session)
@@ -60,7 +66,7 @@ module IssuesSessions
       # recovered afterwards by anyone, including whoever reads the database.
       refresh_token: refresh_token,
       refresh_token_expires_in: Session::REFRESH_TOKEN_TTL.to_i
-    }.merge(sso_bootstrap ? sso_bootstrap_fields(identity) : {})
+    }.merge(sso_bootstrap ? sso_bootstrap_fields(identity, session) : {})
   end
 
   # The realm-wide browser session is NOT established here, and cannot be.
@@ -79,10 +85,12 @@ module IssuesSessions
   # Reached by sign-in, sign-up AND mfa verification -- every path that accepts a
   # credential and no other. An MFA challenge does not come through here, so this
   # is never handed to someone who has given a password but not a second factor.
-  def sso_bootstrap_fields(identity)
+  def sso_bootstrap_fields(identity, session)
     return {} unless Current.client.realm.sso?
 
-    _bootstrap, raw = SsoBootstrap.issue!(identity: identity, client: Current.client)
+    _bootstrap, raw = SsoBootstrap.issue!(
+      identity: identity, client: Current.client, session: session
+    )
 
     {
       sso_bootstrap_token: raw,

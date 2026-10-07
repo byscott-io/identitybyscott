@@ -75,9 +75,14 @@ here.
 - Opaque value, digest stored. Not a signed or encrypted cookie: a signed
   cookie is self-contained and so stays valid until it expires whatever the
   database says, and this credential has to be revocable.
-- Revoked by `sign_out` and by log-out-everywhere. A realm session that
-  survived sign-out would make sign-out decorative — the application would
-  bounce through `/authorize` and be signed straight back in.
+- Revoked by `sign_out` — **this browser's only** — and by log-out-everywhere,
+  which reaches all of them. A realm session that survived sign-out would make
+  sign-out decorative: the application would bounce through `/authorize` and be
+  signed straight back in. But the browser is identified by
+  `sessions.sso_session_id`, recorded at the bootstrap navigation or the code
+  exchange, NOT by the cookie — which never reaches `/api`. Revoking by identity
+  instead signs someone out on their phone because they signed out on their
+  laptop, which is what this started as.
 
 So the API still has **no ambient credential**, which is why it still needs no
 CSRF token: a request to `/api` cannot carry anything but a bearer token the

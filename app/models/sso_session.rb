@@ -31,6 +31,12 @@ class SsoSession < ApplicationRecord
   # one already in flight rather than leaving it redeemable.
   has_many :authorization_codes, dependent: :destroy
 
+  # The application sessions established through this browser. nullify rather
+  # than destroy: revoking a realm session must not take an application's
+  # refresh token with it. Signing out of the realm means no new application can
+  # be reached silently, not that the ones already signed in are logged out.
+  has_many :sessions, dependent: :nullify
+
   validates :token_digest, presence: true, uniqueness: true
   validates :expires_at, presence: true
 

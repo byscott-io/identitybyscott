@@ -119,6 +119,17 @@ RSpec.describe "POST /api/apps/:client_id/auth/token" do
       expect(payload["realm"]).to eq(realm.key)
     end
 
+    # So that signing out of THIS application later revokes the browser's realm
+    # session rather than every one the identity has.
+    it "links the new session to the realm session the code came from" do
+      code = code_from_authorize
+      realm_session = identity.sso_sessions.active.sole
+
+      exchange(code: code)
+
+      expect(identity.sessions.order(:created_at).last.sso_session).to eq(realm_session)
+    end
+
     it "records a session the identity can see and revoke" do
       code = code_from_authorize
 
