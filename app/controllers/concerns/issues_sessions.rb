@@ -37,7 +37,11 @@ module IssuesSessions
     }, status: :forbidden
   end
 
-  def session_response(identity)
+  # sso_cookie: false is for the code exchange, which is completing a login that
+  # already established a realm session rather than starting one. Re-issuing
+  # there would turn SsoSession's absolute twelve-hour lifetime into a sliding
+  # one, which is the opposite of why that number was chosen.
+  def session_response(identity, sso_cookie: true)
     session, refresh_token = Session.issue!(
       identity: identity,
       client: Current.client,
@@ -52,7 +56,7 @@ module IssuesSessions
     # credential and no other. In particular an MFA challenge does NOT come
     # through here, so the cookie is never issued to someone who has given a
     # password but not yet a second factor.
-    issue_sso_cookie!(identity)
+    issue_sso_cookie!(identity) if sso_cookie
 
     issuer = TokenIssuer.new(identity: identity, client: Current.client, session: session)
 
