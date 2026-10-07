@@ -50,6 +50,7 @@ is the confusion that class already warns about.
 ```
 POST /api/apps/:client_id/auth/sign_in
 GET  /sso/authorize?client_id=…&redirect_uri=…&state=…&code_challenge=…
+POST /api/apps/:client_id/auth/token          (redeems the code)
 GET  /.well-known/jwks.json
 GET  /.well-known/openid-configuration
 ```
@@ -63,6 +64,14 @@ one `authorization_endpoint` — but still from a named source, never `params`.
 or returns `login_required` for the application to handle with its own form.
 There is no hosted login page to prompt with, which is why
 `prompt_values_supported` is only `none` and `login`.
+
+The two halves sit on different surfaces, decided by what a CORS preflight can
+see. `/authorize` is a top-level navigation, so no preflight happens and there is
+no origin check to keep; the token endpoint is a preflighted cross-origin POST,
+and a refused preflight stops the real request being sent — so its `client_id`
+stays in the path to keep that control. Discovery therefore advertises
+`authorization_endpoint` but **no `token_endpoint`**: OIDC publishes one, and
+this server's is per-application. That is deliberate, not a gap.
 
 ## Where things are
 
@@ -79,6 +88,7 @@ There is no hosted login page to prompt with, which is why
 | `app/models/sso_session.rb` | the realm-wide browser session behind single sign-on |
 | `app/models/authorization_code.rb` | the redirect-borne code, and the rules for consuming it |
 | `app/controllers/sso/authorizations_controller.rb` | `/sso/authorize`; the validation ORDER is the security property |
+| `app/controllers/api/tokens_controller.rb` | redeems a code; consumes BEFORE verifying, deliberately |
 | `app/controllers/concerns/sso_cookie.rb` | the only cookie this server sets, and its attributes |
 | `app/controllers/concerns/issues_sessions.rb` | the one place a session is issued, and where grants are enforced |
 | `bin/check-public-safe` | refuses secrets and infrastructure detail; see the rules |

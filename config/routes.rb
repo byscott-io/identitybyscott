@@ -49,6 +49,11 @@ Rails.application.routes.draw do
     # revoking the right session requires knowing which token asked.
     delete "auth/sign_out", to: "user_sessions#sign_out"
     post "auth/refresh", to: "refreshes#create"
+
+    # Redeems an authorization code from /sso/authorize. In the path-scoped
+    # block, not under /sso, because this one IS preflighted -- see
+    # Api::TokensController.
+    post "auth/token", to: "tokens#create"
     get "auth/sessions", to: "user_sessions#index"
     delete "auth/sessions", to: "user_sessions#destroy_all"
     delete "auth/sessions/:id", to: "user_sessions#destroy"

@@ -26,10 +26,21 @@ class WellKnownController < ApplicationController
       issuer: issuer,
       jwks_uri: "#{issuer}/.well-known/jwks.json",
 
-      # Single sign-on. Advertised because it exists and works; there is
-      # deliberately no token_endpoint yet, because the code exchange is the
-      # next slice and claiming an endpoint that 404s is worse than omitting
-      # one.
+      # Single sign-on.
+      #
+      # There is no token_endpoint here even though the code exchange exists,
+      # and that is not an omission to fix later. OIDC publishes ONE
+      # token_endpoint, and this server's is per-application
+      # (/api/apps/:client_id/auth/token) because a CORS preflight can see only
+      # the URL, so the client has to be in the path for the origin check that
+      # protects every other credential endpoint to work there too.
+      #
+      # One URL would mean giving that check up. Publishing a URL with a
+      # placeholder in it, or one that 404s, would be worse than saying nothing.
+      # So the authorization endpoint is advertised, the token endpoint is
+      # documented, and discovery stays honest about being partial -- which it
+      # already is, since the credential endpoints are this server's own API
+      # rather than OAuth grants.
       authorization_endpoint: "#{issuer}/sso/authorize",
       response_types_supported: [ "code" ],
       response_modes_supported: [ "query" ],

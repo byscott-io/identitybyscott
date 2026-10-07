@@ -465,9 +465,12 @@ RSpec.describe "GET /sso/authorize" do
       expect(body["prompt_values_supported"]).to eq(%w[none login])
     end
 
-    # Honest about what it cannot do. A client that expects to force a prompt
-    # should learn that here rather than by trying.
-    it "does not claim a token_endpoint it has not got yet" do
+    # Not an omission waiting to be filled. The exchange exists, but this
+    # server's token endpoint is per-application, because a preflight can see
+    # only the URL and the client has to be in the path for the origin check to
+    # work. OIDC publishes one token_endpoint, so there is no single URL to
+    # publish -- and a placeholder would be worse than silence.
+    it "advertises no token_endpoint, because there is no single URL to give" do
       get "/.well-known/openid-configuration"
 
       expect(response.parsed_body).not_to have_key("token_endpoint")
