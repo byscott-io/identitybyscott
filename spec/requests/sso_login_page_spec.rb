@@ -273,12 +273,31 @@ RSpec.describe "the hosted login page" do
       expect(SsoSession.count).to eq(0)
     end
 
+    # Rails' own InvalidAuthenticityToken is what raises now, so this renders a
+    # dedicated page rather than the login form's generic error. The property is
+    # unchanged: a cross-site submission and a tab left open too long say the
+    # same thing, and neither names the cause to whoever sent it.
     it "says nothing about which half was wrong" do
       visit_login
       submit(authenticity_token: "nope", email: identity.email, password: password)
 
-      expect(response.body).to include("Something went wrong")
-      expect(response.body).not_to match(/csrf|token|cookie/i)
+      expect(response.body).to include("no longer valid")
+      expect(response.body).not_to match(/csrf|forgery|authenticity|cookie/i)
+    end
+
+    # Protection is ON rather than skipped, so an action added to this controller
+    # later is covered by Rails' own before_action instead of waiting for
+    # somebody to remember a manual check. CodeQL flagged the previous
+    # skip_forgery_protection for exactly that reason, and was right to.
+    #
+    # Asserted on the CALLBACK CHAIN, not on forgery_protection_strategy: that
+    # strategy is inherited and reads the same whether or not this controller
+    # skips the check, so it would pass even with protection turned off. The
+    # callback is what skip_forgery_protection removes.
+    it "does not skip Rails' forgery protection" do
+      filters = Sso::LoginsController._process_action_callbacks.map { |cb| cb.filter.to_s }
+
+      expect(filters).to include("verify_authenticity_token")
     end
 
     it "also guards the second factor" do

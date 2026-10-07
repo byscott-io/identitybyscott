@@ -37,6 +37,16 @@ module DoubleSubmitCsrf
   included do
     include ActionController::Cookies
 
+    # Rails' forgery protection stays ON, and this overrides only the part that
+    # needs a session -- how a request is judged verified. See verified_request?.
+    #
+    # Keeping it on rather than skipping it and checking per action is the
+    # safer structure: a new action added to a controller including this is
+    # protected by Rails' own before_action, where previously it would have had
+    # NO protection until somebody remembered to call the check. CodeQL flags
+    # the skip for that reason, and it was right to.
+    protect_from_forgery with: :exception
+
     # The form needs it, and it is named distinctly rather than `csrf_token` so
     # it cannot be confused with Rails' own helper -- which is tied to a session
     # this server deliberately does not have.
@@ -68,19 +78,30 @@ module DoubleSubmitCsrf
     end
   end
 
-  # Compared in fixed time, like any secret. The value is not guessable, but a
-  # length-or-prefix difference is free to exploit when the attacker controls
-  # the guess.
-  def verify_csrf!
+  # Rails calls this to decide whether a request is forgery-free, and normally
+  # answers it by comparing against a token in the session. This answers it with
+  # the double submit instead, so Rails' protection remains in force while
+  # needing no session.
+  #
+  # GET and HEAD are exempt here as they are in Rails: they change nothing, and
+  # the GET is what ISSUES the token.
+  def verified_request?
+    return true if request.get? || request.head?
+
     submitted = params[FIELD_NAME].to_s
     expected = cookies[COOKIE_NAME].to_s
 
-    return true if expected.present? && submitted.present? &&
-                   ActiveSupport::SecurityUtils.secure_compare(submitted, expected)
+    # Compared in fixed time, like any secret. The value is not guessable, but a
+    # length-or-prefix difference is free to exploit when the attacker controls
+    # the guess. secure_compare already refuses differing lengths, so the blank
+    # guards are for clarity rather than correctness.
+    if expected.present? && submitted.present? &&
+       ActiveSupport::SecurityUtils.secure_compare(submitted, expected)
+      return true
+    end
 
-    # Deliberately not a helpful error. A missing cookie and a wrong token are
-    # the same answer, and the honest cause -- somebody submitted a form this
-    # browser was not given -- is not something to explain to whoever did it.
+    # The honest cause -- somebody submitted a form this browser was not given --
+    # is logged, not explained to whoever did it.
     Rails.logger.info("[identity] login POST refused: csrf")
     false
   end

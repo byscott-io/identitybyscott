@@ -39,10 +39,13 @@ module Sso
 
     layout "sso"
 
-    # Rails' own CSRF is deliberately not used: it keys the token to a session,
-    # and a session store would put an ambient credential on every path in this
-    # server. DoubleSubmitCsrf does the job with one cookie. See that concern.
-    skip_forgery_protection
+    # Rails' forgery protection is ON. DoubleSubmitCsrf keeps it on and replaces
+    # only the session-dependent half -- see verified_request? there -- so every
+    # action here is covered by Rails' own before_action rather than by each one
+    # remembering to check.
+    #
+    # A refused token raises InvalidAuthenticityToken, handled below.
+    rescue_from ActionController::InvalidAuthenticityToken, with: :render_stale_form
 
     before_action :apply_security_headers
 
@@ -75,8 +78,6 @@ module Sso
     end
 
     def create
-      return render_login(error: :generic) unless verify_csrf!
-
       pending = PendingAuthorization.decode(params[:authorization])
       client = resolve_client!(pending)
       return if performed?
@@ -101,8 +102,6 @@ module Sso
     end
 
     def mfa
-      return render_login(error: :generic) unless verify_csrf!
-
       pending = PendingAuthorization.decode(params[:authorization])
       client = resolve_client!(pending)
       return if performed?
@@ -201,6 +200,14 @@ module Sso
     def render_expired
       @theme = Theme::DEFAULTS
       render :expired, status: :unprocessable_content
+    end
+
+    # A form this browser was not given -- a cross-site submission, or a tab left
+    # open long enough for the cookie to go. Said the same way either way, and
+    # without naming CSRF to whoever sent it.
+    def render_stale_form
+      @theme = Theme::DEFAULTS
+      render :stale, status: :unprocessable_content
     end
 
     def too_many_requests
