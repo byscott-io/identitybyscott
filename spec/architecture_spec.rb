@@ -139,13 +139,33 @@ RSpec.describe "architectural rules" do
       expect(ApplicationController.superclass).to eq(ActionController::API)
     end
 
-    # No ambient credential means CSRF has nothing to forge. Adding a session
-    # would quietly make CSRF protection necessary.
-    it "has no cookie, session or flash middleware" do
+    # The cookie middleware came back for exactly one cookie -- the single
+    # sign-on session -- and brought nothing else with it.
+    #
+    # A session store or flash would reintroduce an ambient credential for the
+    # API, and with it the need for CSRF protection. The SSO cookie does not,
+    # because it is path-scoped to /sso: the browser never attaches it to an
+    # /api request, so a call there still cannot carry anything the caller did
+    # not deliberately attach.
+    it "has the cookie middleware but no session store or flash" do
       stack = Rails.application.middleware.map { |m| m.klass.to_s }
-      ambient = stack.grep(/Cookies|Session|Flash/)
+      ambient = stack.grep(/Session|Flash/)
 
-      expect(ambient).to be_empty, "ambient credentials reintroduce CSRF: #{ambient}"
+      expect(stack.grep(/Cookies/)).not_to be_empty
+      expect(ambient).to be_empty, "a session or flash reintroduces CSRF: #{ambient}"
+    end
+
+    # One cookie, written in one place. The attributes that make it safe --
+    # HttpOnly, SameSite, the path scope, no Domain -- are stated once in
+    # SsoCookie, and a second writer elsewhere would be a second, unreviewed
+    # set of them.
+    it "writes cookies from SsoCookie and nowhere else" do
+      writers = Dir["app/**/*.rb"].reject { |path| path.end_with?("concerns/sso_cookie.rb") }
+                                  .select do |path|
+        File.read(path).match?(/cookies\s*\[[^\]]+\]\s*=|(?:set|delete)_cookie/)
+      end
+
+      expect(writers).to be_empty, "the SSO cookie's attributes are stated once: #{writers}"
     end
 
     it "has no view templates outside mailers" do

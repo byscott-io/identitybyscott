@@ -23,3 +23,11 @@ postgres://postgres:postgres@localhost
 # the versions that caused it. Allowlisted as literals rather than by relaxing
 # the IP pattern, so an actual address in a message is still refused.
 \b(?:3\.17\.0\.6|3\.3\.12\.0)\b
+
+# RFC 5737 documentation address ranges (192.0.2.0/24, 198.51.100.0/24,
+# 203.0.113.0/24), used in specs that record a browser's IP. These exist
+# precisely so examples can carry an address that can never route, so they
+# cannot describe infrastructure of ours. Matched as the three reserved /24s
+# rather than by relaxing the IP pattern or excluding spec/, so a real address
+# anywhere -- including in a spec -- is still refused.
+\b(?:192\.0\.2|198\.51\.100|203\.0\.113)\.\d{1,3}\b
