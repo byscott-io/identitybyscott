@@ -25,6 +25,21 @@ Rails.application.routes.draw do
   # authorization_endpoint, which a per-client path could not be.
   scope "sso", module: :sso do
     get "authorize", to: "authorizations#show"
+
+    # The hosted login page: the only HTML this server serves outside mailers.
+    #
+    # It exists because every alternative leaves the password in an
+    # application's own origin, where that application's XSS steals the
+    # credential rather than a session -- and because only a top-level page on
+    # this origin gives somebody an address bar to check who is asking. See
+    # Sso::LoginsController.
+    get "login", to: "logins#new", as: :sso_login_form
+    post "login", to: "logins#create", as: :sso_login
+    post "login/mfa", to: "logins#mfa", as: :sso_login_mfa
+
+    # The logo, from bytes held here, so img-src 'self' holds on a page that
+    # takes a password.
+    get "logo", to: "theme_logos#show", as: :sso_theme_logo
   end
 
   # Credential endpoints, scoped by client_id in the PATH.

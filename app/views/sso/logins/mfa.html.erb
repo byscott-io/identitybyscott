@@ -1,0 +1,24 @@
+<%= render "brand" %>
+
+<% if @error %>
+  <p class="error">That code was not accepted.</p>
+<% end %>
+
+<form method="post" action="<%= sso_login_mfa_path %>">
+  <input type="hidden" name="authenticity_token" value="<%= login_csrf_token %>">
+  <input type="hidden" name="authorization" value="<%= @pending_token %>">
+  <%#
+    Proves the password was correct and nothing else. It is not an access token
+    and cannot be used as one.
+  %>
+  <input type="hidden" name="mfa_token" value="<%= @mfa_token %>">
+
+  <label for="code">Authentication code</label>
+  <%# inputmode rather than type=number, which strips leading zeros. %>
+  <input type="text" id="code" name="code" inputmode="numeric"
+         autocomplete="one-time-code" required autofocus>
+
+  <button type="submit">Verify</button>
+
+  <p class="hint">Enter the code from your authenticator app, or a backup code.</p>
+</form>

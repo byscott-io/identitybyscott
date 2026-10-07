@@ -1,0 +1,14 @@
+<%#
+  The application's branding, as far as it is allowed to reach: a logo this
+  server holds the bytes of, and a name it escapes. Nothing here can reposition,
+  conceal or overlay the form below.
+%>
+<div class="brand">
+  <% if @logo_owner %>
+    <img src="<%= sso_theme_logo_path(client_id: @client.client_id) %>"
+         alt="<%= @theme[:display_name] || @client.name %>">
+  <% end %>
+  <% if @theme[:display_name].present? %>
+    <h1><%= @theme[:display_name] %></h1>
+  <% end %>
+</div>

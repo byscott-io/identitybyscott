@@ -61,7 +61,7 @@ module SsoCookie
   def issue_sso_cookie!(identity)
     return unless identity.realm.sso?
 
-    _session, raw = SsoSession.issue!(identity: identity, request: request)
+    sso_session, raw = SsoSession.issue!(identity: identity, request: request)
 
     cookies[COOKIE_NAME] = sso_cookie_attributes.merge(
       value: raw,
@@ -71,6 +71,10 @@ module SsoCookie
       # that is presented and rejected rather than one that is gone.
       expires: SsoSession::SSO_SESSION_TTL.from_now
     )
+
+    # Returned so a caller can bind what it issues to this browser session --
+    # the hosted login page binds the authorization code it mints to it.
+    sso_session
   end
 
   # Revokes every live SSO session for this identity and clears the cookie.

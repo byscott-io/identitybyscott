@@ -1,0 +1,44 @@
+<%= render "brand" if @client %>
+
+<%#
+  ONE message for a wrong password and an unknown address, because telling them
+  apart would make this a way to ask which realm an address exists in -- the
+  cross-realm fact realms exist to isolate. The lock and confirmation messages
+  are only ever reached by somebody who has already proved the password, so they
+  reveal nothing that person did not just demonstrate.
+%>
+<% if @error %>
+  <p class="error">
+    <% case @error
+       when :invalid %>
+      Incorrect email or password.
+    <% when :locked %>
+      This account is locked. Check your email for unlock instructions.
+    <% when :unconfirmed %>
+      Confirm your email address before signing in.
+    <% when :not_granted %>
+      This account has not been enabled for this application.
+    <% else %>
+      Something went wrong. Please try again.
+    <% end %>
+  </p>
+<% end %>
+
+<% if @pending %>
+  <form method="post" action="<%= sso_login_path %>">
+    <%# Bound to this browser by a cookie. See DoubleSubmitCsrf. %>
+    <input type="hidden" name="authenticity_token" value="<%= login_csrf_token %>">
+    <%# This server's own signed statement of what it already validated. %>
+    <input type="hidden" name="authorization" value="<%= @pending_token %>">
+
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" autocomplete="username"
+           required autofocus value="<%= params[:email] %>">
+
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password"
+           autocomplete="current-password" required>
+
+    <button type="submit">Sign in</button>
+  </form>
+<% end %>
