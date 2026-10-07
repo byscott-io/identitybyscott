@@ -25,6 +25,11 @@ Rails.application.routes.draw do
   # authorization_endpoint, which a per-client path could not be.
   scope "sso", module: :sso do
     get "authorize", to: "authorizations#show"
+
+    # Establishes the cookie during a top-level navigation, because this server
+    # is a third party to every application it serves and a cookie set in reply
+    # to a cross-site request is refused or partitioned. See SsoBootstrap.
+    get "bootstrap", to: "bootstraps#show"
   end
 
   # Credential endpoints, scoped by client_id in the PATH.

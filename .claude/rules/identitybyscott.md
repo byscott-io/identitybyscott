@@ -38,6 +38,18 @@ here.
 
 - Set and cleared only in `SsoCookie`. One file, so its attributes are stated
   once and cannot be weakened by a copy somewhere else.
+- **Established only at `/sso/bootstrap`, during a top-level navigation. Never
+  in a reply to `sign_in`.** This looks like a pointless detour and is not. The
+  applications are on their own registrable domains, so this server is a THIRD
+  PARTY to all of them, and a cookie set in reply to a cross-site request is
+  refused by Safari's tracking prevention and partitioned by Firefox's — filed
+  under the application's own top-level site, where no other application in the
+  realm can see it, which is the only thing single sign-on is for. Setting it at
+  sign-in therefore *appears* to work in whichever browser it is first tried in
+  and silently fails to do its job. A top-level navigation makes this server the
+  top-level site, so the cookie is first-party and shared across the realm.
+  `sign_in` hands back a one-use `sso_bootstrap_token` and the application
+  navigates with it. This was got wrong once already.
 - `path=/sso`, which is the load-bearing part. The browser decides what to
   attach by path, so the cookie is simply absent from every request under
   `/api` — not by a convention this code has to remember, but because the

@@ -64,15 +64,15 @@ module Api
         return render_invalid_grant
       end
 
-      # sso_cookie: false. The realm session already exists -- this code was
-      # minted from it and is bound to it -- so there is nothing to establish.
+      # sso_bootstrap: false. The realm session already exists -- this code was
+      # minted from it and is bound to it, and the browser redeeming the code
+      # demonstrably holds the cookie, since that is how it got the code.
       #
-      # More importantly, issuing one here would quietly convert the twelve-hour
-      # absolute lifetime into a sliding one: every application a person opened
-      # would push the realm session's expiry out again, and the bound window
-      # that lifetime was chosen to provide would never close for an active
-      # browser.
-      render json: session_response(code.identity, sso_cookie: false)
+      # Handing back a way to establish another would also quietly convert the
+      # twelve-hour absolute lifetime into a sliding one: every application a
+      # person opened would push the expiry out again, so the bound window that
+      # lifetime was chosen to provide would never close for an active browser.
+      render json: session_response(code.identity, sso_bootstrap: false)
     end
 
     private

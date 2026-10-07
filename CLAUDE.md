@@ -35,6 +35,13 @@ here, because it travels in a URL: one minute, consumed atomically on first use,
 and bound to the client, the exact `redirect_uri`, a PKCE challenge and the
 browser session it came from. Seeing one is not enough to redeem it.
 
+**SsoBootstrap** — a one-use, one-minute token that lets a top-level navigation
+establish the SSO cookie. Needed because this server sits on a different
+registrable domain from the applications, so a cookie set in reply to their
+cross-site sign-in request is refused or partitioned by the browser and never
+reaches the other applications in the realm. `sign_in` returns the token; the
+application navigates to `/sso/bootstrap` with it.
+
 **Grant** — permission for one identity to use one application. Existing in a
 realm is *not* permission to use the applications in it: authentication says who
 someone is, a grant says where they may take that. Signing up grants the
@@ -49,6 +56,7 @@ is the confusion that class already warns about.
 
 ```
 POST /api/apps/:client_id/auth/sign_in
+GET  /sso/bootstrap?token=…&return_to=…           (establishes the cookie)
 GET  /sso/authorize?client_id=…&redirect_uri=…&state=…&code_challenge=…
 POST /api/apps/:client_id/auth/token          (redeems the code)
 GET  /.well-known/jwks.json
@@ -65,8 +73,12 @@ or returns `login_required` for the application to handle with its own form.
 There is no hosted login page to prompt with, which is why
 `prompt_values_supported` is only `none` and `login`.
 
-The two halves sit on different surfaces, decided by what a CORS preflight can
-see. `/authorize` is a top-level navigation, so no preflight happens and there is
+The cookie is established at `/sso/bootstrap` and nowhere else — never in a
+reply to `sign_in`. See the rule; it is a browser constraint, not a preference,
+and it was got wrong once.
+
+The two halves of the code flow sit on different surfaces, decided by what a
+CORS preflight can see. `/authorize` is a top-level navigation, so no preflight happens and there is
 no origin check to keep; the token endpoint is a preflighted cross-origin POST,
 and a refused preflight stops the real request being sent — so its `client_id`
 stays in the path to keep that control. Discovery therefore advertises
@@ -87,6 +99,8 @@ this server's is per-application. That is deliberate, not a gap.
 | `app/models/grant.rb` | which applications an identity may use |
 | `app/models/sso_session.rb` | the realm-wide browser session behind single sign-on |
 | `app/models/authorization_code.rb` | the redirect-borne code, and the rules for consuming it |
+| `app/models/sso_bootstrap.rb` | why the cookie cannot be set at sign-in, and the token that fixes it |
+| `app/controllers/sso/bootstraps_controller.rb` | `/sso/bootstrap`; establishes the cookie first-party |
 | `app/controllers/sso/authorizations_controller.rb` | `/sso/authorize`; the validation ORDER is the security property |
 | `app/controllers/api/tokens_controller.rb` | redeems a code; consumes BEFORE verifying, deliberately |
 | `app/controllers/concerns/sso_cookie.rb` | the only cookie this server sets, and its attributes |

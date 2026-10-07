@@ -9,14 +9,25 @@ require "rails_helper"
 # is the exception, so the exception is what gets specced -- and the central
 # claim is NEGATIVE: the cookie exists, and authenticates nothing.
 #
+# It is established at /sso/bootstrap and NOWHERE ELSE, during a top-level
+# navigation. It cannot be established at sign-in, and these specs assert that it
+# is not: this server is on a different registrable domain from every application
+# it serves, so a cookie set in reply to a cross-site XHR is refused by Safari's
+# tracking prevention and partitioned by Firefox's -- filed under the
+# application's own top-level site, invisible to every other application in the
+# realm, which is the only thing single sign-on is for.
+#
 # The attribute assertions read the raw Set-Cookie header rather than the
 # `cookies` jar, because the jar reports the value and drops exactly the flags
-# that matter. HttpOnly, SameSite and Path are enforced by the browser from that
-# header, so the header is the thing worth asserting on.
+# that matter.
 RSpec.describe "the single sign-on cookie" do
   let(:signing_key) { OpenSSL::PKey::RSA.generate(2048) }
   let(:realm) { create(:realm, require_email_confirmation: false, sso_enabled: true) }
-  let(:client) { create(:client, realm: realm, allowed_origins: "https://app.example.com") }
+  let(:return_to) { "https://app.example.com/signed-in" }
+  let(:client) do
+    create(:client, realm: realm, allowed_origins: "https://app.example.com",
+                    redirect_uris: return_to)
+  end
   let(:password) { "correct horse battery staple" }
   let!(:identity) do
     create(:identity, realm: realm, signup_client: client, email: "ada@example.com",
@@ -42,24 +53,96 @@ RSpec.describe "the single sign-on cookie" do
     response.parsed_body
   end
 
-  # The Set-Cookie line for our cookie, as the browser will receive it.
+  # The real two-step: sign in for a token, then navigate to spend it.
+  def bootstrap(token: nil, to: nil)
+    token ||= sign_in["sso_bootstrap_token"]
+    get "/sso/bootstrap", params: { token: token, return_to: to || return_to }
+  end
+
   def set_cookie_header
     Array(response.headers["Set-Cookie"]).flat_map { |h| h.split("\n") }
                                         .find { |h| h.start_with?("#{SsoCookie::COOKIE_NAME}=") }
   end
 
-  describe "when the realm has single sign-on enabled" do
-    it "is set on sign-in" do
+  # ---------------------------------------------------------------------------
+  # Sign-in cannot establish it, and must not pretend to.
+  # ---------------------------------------------------------------------------
+  describe "signing in" do
+    it "sets no cookie, because a cross-site response cannot establish one" do
       sign_in
 
+      expect(set_cookie_header).to be_nil
+      expect(SsoSession.count).to eq(0)
+    end
+
+    it "returns a one-use bootstrap token instead" do
+      body = sign_in
+
+      expect(body["sso_bootstrap_token"]).to be_present
+      expect(body["sso_bootstrap_expires_in"]).to eq(60)
+    end
+
+    # The token is the credential that establishes a realm session, so only its
+    # digest may be stored.
+    it "stores only a digest of the bootstrap token" do
+      raw = sign_in["sso_bootstrap_token"]
+
+      expect(SsoBootstrap.where(token_digest: raw)).to be_empty
+      expect(SsoBootstrap.last.token_digest).to eq(Digest::SHA256.hexdigest(raw))
+    end
+
+    # The flag is the control. A realm that has not asked for single sign-on
+    # gets no realm-wide credential as a side effect of someone signing in.
+    context "when the realm has single sign-on disabled" do
+      let(:realm) { create(:realm, require_email_confirmation: false, sso_enabled: false) }
+
+      it "offers no bootstrap token at all" do
+        body = sign_in
+
+        expect(body).not_to have_key("sso_bootstrap_token")
+        expect(SsoBootstrap.count).to eq(0)
+      end
+    end
+
+    # A completed authentication only. Issuing this beside the password would
+    # make the second factor optional for anyone who then walked to another
+    # application in the realm.
+    context "with MFA enabled" do
+      before { identity.update!(mfa_enabled: true, mfa_secret: ROTP::Base32.random) }
+
+      it "offers nothing at the challenge stage" do
+        body = sign_in
+
+        expect(body["mfa_required"]).to be(true)
+        expect(body).not_to have_key("sso_bootstrap_token")
+        expect(SsoBootstrap.count).to eq(0)
+      end
+
+      it "offers it once the second factor is accepted" do
+        token = sign_in["mfa_token"]
+        code = ROTP::TOTP.new(identity.mfa_secret).now
+
+        post "/api/apps/#{client.client_id}/auth/verify_mfa",
+             params: { mfa_token: token, code: code }, headers: origin
+
+        expect(response.parsed_body["sso_bootstrap_token"]).to be_present
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  describe "the bootstrap navigation" do
+    it "establishes the cookie and sends the browser back" do
+      bootstrap
+
+      expect(response).to have_http_status(:found)
+      expect(response.headers["Location"]).to eq(return_to)
       expect(set_cookie_header).to be_present
       expect(identity.sso_sessions.active.count).to eq(1)
     end
 
-    # Each flag here is a separate way the cookie could leak or be driven by
-    # someone else's page, so each is asserted on its own.
-    describe "its attributes" do
-      before { sign_in }
+    describe "the cookie's attributes" do
+      before { bootstrap }
 
       # An XSS anywhere in the realm would otherwise read a credential good at
       # every other application in it.
@@ -68,8 +151,8 @@ RSpec.describe "the single sign-on cookie" do
       end
 
       # Lax, never None. Lax still rides a top-level navigation, which is how
-      # /authorize will be reached; None would hand the cookie to any site that
-      # embeds us, and Strict would break the navigation the flow depends on.
+      # /authorize is reached; None would hand the cookie to any site that
+      # embeds us, and Strict would break that navigation.
       it "is SameSite=Lax" do
         expect(set_cookie_header).to match(/;\s*SameSite=Lax/i)
         expect(set_cookie_header).not_to match(/SameSite=None/i)
@@ -92,8 +175,6 @@ RSpec.describe "the single sign-on cookie" do
         expect(set_cookie_header).to match(/;\s*expires=/i)
       end
 
-      # Only the digest is persisted, so the header value must not appear in the
-      # table. A dump of sso_sessions is then worth nothing on its own.
       it "sends a value the database does not contain" do
         value = set_cookie_header[/#{SsoCookie::COOKIE_NAME}=([^;]+)/, 1]
 
@@ -102,52 +183,111 @@ RSpec.describe "the single sign-on cookie" do
         expect(SsoSession.last.token_digest).to eq(Digest::SHA256.hexdigest(CGI.unescape(value)))
       end
     end
+
+    describe "refusals" do
+      def expect_refused
+        expect(response).to have_http_status(:bad_request)
+        expect(response.parsed_body).to eq({ "error" => "invalid_request" })
+        expect(response.headers["Location"]).to be_nil
+      end
+
+      it "refuses an unknown token" do
+        bootstrap(token: SecureRandom.urlsafe_base64(32))
+
+        expect_refused
+      end
+
+      it "refuses a blank token" do
+        bootstrap(token: "")
+
+        expect_refused
+      end
+
+      # Single use, and single ATTEMPT -- spent before return_to is even looked
+      # at, so a failed try cannot be repeated against a different return_to.
+      it "refuses a token that has already been spent" do
+        token = sign_in["sso_bootstrap_token"]
+        bootstrap(token: token)
+
+        bootstrap(token: token)
+
+        expect_refused
+      end
+
+      it "establishes no second session on a replay" do
+        token = sign_in["sso_bootstrap_token"]
+        bootstrap(token: token)
+
+        expect { bootstrap(token: token) }.not_to change(SsoSession, :count)
+      end
+
+      it "refuses an expired token" do
+        token = sign_in["sso_bootstrap_token"]
+        SsoBootstrap.last.update_column(:expires_at, 1.second.ago)
+
+        bootstrap(token: token)
+
+        expect_refused
+      end
+
+      # The open-redirect property, on an endpoint that has just been asked to
+      # set a credential cookie.
+      it "refuses an unregistered return_to WITHOUT redirecting to it" do
+        bootstrap(to: "https://attacker.test/steal")
+
+        expect_refused
+        expect(response.body).not_to include("attacker.test")
+      end
+
+      it "sets no cookie when return_to is unregistered" do
+        bootstrap(to: "https://attacker.test/steal")
+
+        expect(set_cookie_header).to be_nil
+        expect(SsoSession.count).to eq(0)
+      end
+
+      # Near-misses, as everywhere else a URI is matched here.
+      [
+        "https://app.example.com.attacker.test/signed-in",
+        "https://app.example.com/signed-in/",
+        "https://app.example.com/signed-in?x=1",
+        "http://app.example.com/signed-in",
+        "https://APP.example.com/signed-in"
+      ].each do |uri|
+        it "refuses #{uri}" do
+          bootstrap(to: uri)
+
+          expect_refused
+        end
+      end
+
+      it "spends the token even when return_to is refused" do
+        token = sign_in["sso_bootstrap_token"]
+        bootstrap(token: token, to: "https://attacker.test/steal")
+
+        bootstrap(token: token)
+
+        expect_refused
+      end
+
+      # The realm could have had single sign-on turned off in the minute since
+      # the token was issued, and this is the request that would otherwise hand
+      # out the cookie anyway.
+      it "refuses once the realm has single sign-on turned off" do
+        token = sign_in["sso_bootstrap_token"]
+        realm.update!(sso_enabled: false)
+
+        bootstrap(token: token)
+
+        expect_refused
+        expect(SsoSession.count).to eq(0)
+      end
+    end
   end
 
-  # The flag is the control. A realm that has not asked for single sign-on must
-  # not acquire a realm-wide credential as a side effect of someone signing in.
-  describe "when the realm has single sign-on disabled" do
-    let(:realm) { create(:realm, require_email_confirmation: false, sso_enabled: false) }
-
-    it "sets no cookie" do
-      sign_in
-
-      expect(set_cookie_header).to be_nil
-    end
-
-    it "records no realm session" do
-      expect { sign_in }.not_to change(SsoSession, :count)
-    end
-  end
-
-  # The cookie belongs to a COMPLETED authentication. Issuing it beside the
-  # password would make the second factor optional for anyone who then walked
-  # to another application in the realm.
-  describe "with MFA enabled" do
-    before { identity.update!(mfa_enabled: true, mfa_secret: ROTP::Base32.random) }
-
-    it "sets no cookie at the challenge stage" do
-      body = sign_in
-
-      expect(body["mfa_required"]).to be(true)
-      expect(set_cookie_header).to be_nil
-      expect(SsoSession.count).to eq(0)
-    end
-
-    it "sets it once the second factor is accepted" do
-      token = sign_in["mfa_token"]
-      code = ROTP::TOTP.new(identity.mfa_secret).now
-
-      post "/api/apps/#{client.client_id}/auth/verify_mfa",
-           params: { mfa_token: token, code: code }, headers: origin
-
-      expect(response).to have_http_status(:ok)
-      expect(set_cookie_header).to be_present
-    end
-  end
-
-  # The heart of this slice. The cookie is issued, and it is not a credential
-  # for anything -- no endpoint reads it, and presenting it buys nothing.
+  # ---------------------------------------------------------------------------
+  # The heart of it. The cookie is established, and is a credential for nothing.
+  # ---------------------------------------------------------------------------
   describe "what the cookie can be used for" do
     it "authenticates nothing: the API still demands a bearer token" do
       _session, raw = SsoSession.issue!(identity: identity)
@@ -174,8 +314,8 @@ RSpec.describe "the single sign-on cookie" do
       end
     end
 
-    # Guards against the cookie being read anywhere in the API by accident --
-    # a `cookies[...]` added to a controller later would show up here.
+    # Guards against the cookie being read anywhere in the API by accident -- a
+    # `cookies[...]` added to a controller later would show up here.
     it "is not read by any controller under app/controllers/api" do
       readers = Dir[Rails.root.join("app/controllers/api/**/*.rb")].select do |file|
         File.read(file).match?(/cookies\s*\[/)
@@ -186,13 +326,17 @@ RSpec.describe "the single sign-on cookie" do
   end
 
   describe "revocation" do
-    def bearer = { "Authorization" => "Bearer #{sign_in["access_token"]}" }
+    def bearer_and_cookie
+      body = sign_in
+      get "/sso/bootstrap", params: { token: body["sso_bootstrap_token"], return_to: return_to }
+      { "Authorization" => "Bearer #{body['access_token']}" }.merge(origin)
+    end
 
     # Otherwise signing out would be decorative: the application would bounce
     # through /authorize, the cookie would still be good, and the person would
     # be signed straight back in without a password.
     it "signing out of one application ends the realm session" do
-      headers = bearer.merge(origin)
+      headers = bearer_and_cookie
       expect(identity.sso_sessions.active.count).to eq(1)
 
       delete "/api/apps/#{client.client_id}/auth/sign_out", headers: headers
@@ -202,20 +346,19 @@ RSpec.describe "the single sign-on cookie" do
     end
 
     it "clears the cookie from the browser as well as revoking the row" do
-      headers = bearer.merge(origin)
+      headers = bearer_and_cookie
 
       delete "/api/apps/#{client.client_id}/auth/sign_out", headers: headers
 
       # A clearing Set-Cookie has to carry the same path, or the browser keeps
-      # the original and only shadows it.
+      # the original and the deletion only shadows it elsewhere.
       expect(set_cookie_header).to match(%r{path=/sso}i)
       expect(set_cookie_header).to match(/\A#{SsoCookie::COOKIE_NAME}=;/)
-      # An expiry in the past is what actually removes it.
       expect(set_cookie_header).to match(/expires=Thu, 01 Jan 1970/i)
     end
 
     it "logging out everywhere ends the realm session too" do
-      headers = bearer.merge(origin)
+      headers = bearer_and_cookie
 
       delete "/api/apps/#{client.client_id}/auth/sessions", headers: headers
 
@@ -223,10 +366,8 @@ RSpec.describe "the single sign-on cookie" do
       expect(identity.sso_sessions.active.count).to eq(0)
     end
 
-    # It is revoked, not deleted: the row stays as a record that the browser
-    # session existed and when it ended.
     it "revokes rather than deletes" do
-      headers = bearer.merge(origin)
+      headers = bearer_and_cookie
 
       expect { delete "/api/apps/#{client.client_id}/auth/sign_out", headers: headers }
         .not_to change(SsoSession, :count)
@@ -246,8 +387,8 @@ RSpec.describe "the single sign-on cookie" do
       expect(middleware).not_to include("ActionDispatch::Flash")
     end
 
-    it "sets no other cookie on sign-in" do
-      sign_in
+    it "sets no other cookie on the bootstrap" do
+      bootstrap
 
       names = Array(response.headers["Set-Cookie"]).flat_map { |h| h.split("\n") }
                                                    .map { |h| h[/\A([^=]+)=/, 1] }

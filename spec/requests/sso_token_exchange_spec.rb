@@ -77,18 +77,33 @@ RSpec.describe "POST /api/apps/:client_id/auth/token" do
       expect(body["token_type"]).to eq("Bearer")
     end
 
-    # The same shape sign_in returns, so the client library needs no new
-    # handling for a single-sign-on login. A different shape here would be a
-    # second code path in every application.
-    it "answers in the same shape as signing in" do
+    # The same token fields sign_in returns, so the client library needs no new
+    # handling for a single-sign-on login.
+    #
+    # The ONE deliberate difference is the bootstrap fields: sign_in offers a way
+    # to establish the realm session, and the exchange does not, because a
+    # browser redeeming a code demonstrably already holds the cookie. Asserted as
+    # an exact difference rather than ignored, so neither side can drift.
+    it "answers in the same shape as signing in, minus the bootstrap fields" do
       code = code_from_authorize
       sso_keys = exchange(code: code).keys
 
       post "/api/apps/#{client.client_id}/auth/sign_in",
            params: { email: identity.email, password: "correct horse battery staple" },
            headers: origin
+      sign_in_keys = response.parsed_body.keys
 
-      expect(sso_keys.sort).to eq(response.parsed_body.keys.sort)
+      expect(sign_in_keys - sso_keys).to eq(%w[sso_bootstrap_token sso_bootstrap_expires_in])
+      expect(sso_keys - sign_in_keys).to be_empty
+    end
+
+    it "offers no bootstrap token, because the browser already holds the cookie" do
+      code = code_from_authorize
+
+      body = exchange(code: code)
+
+      expect(body).not_to have_key("sso_bootstrap_token")
+      expect(SsoBootstrap.count).to eq(0)
     end
 
     it "mints a token the application can actually verify" do

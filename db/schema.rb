@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_07_010001) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_07_013021) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -284,6 +284,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010001) do
     t.index ["key"], name: "index_solid_queue_semaphores_on_key", unique: true
   end
 
+  create_table "sso_bootstraps", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "identity_id", null: false
+    t.uuid "issuing_client_id", null: false
+    t.string "token_digest", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "consumed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["identity_id"], name: "index_sso_bootstraps_on_identity_id"
+    t.index ["issuing_client_id"], name: "index_sso_bootstraps_on_issuing_client_id"
+    t.index ["token_digest"], name: "index_sso_bootstraps_on_token_digest", unique: true
+  end
+
   create_table "sso_sessions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "identity_id", null: false
     t.string "token_digest", null: false
@@ -317,5 +330,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010001) do
   add_foreign_key "solid_queue_ready_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_recurring_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "sso_bootstraps", "clients", column: "issuing_client_id"
+  add_foreign_key "sso_bootstraps", "identities"
   add_foreign_key "sso_sessions", "identities"
 end

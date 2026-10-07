@@ -9,8 +9,6 @@
 module IssuesSessions
   extend ActiveSupport::Concern
 
-  include SsoCookie
-
   private
 
   # Whether this identity may use the calling application.
@@ -37,26 +35,19 @@ module IssuesSessions
     }, status: :forbidden
   end
 
-  # sso_cookie: false is for the code exchange, which is completing a login that
-  # already established a realm session rather than starting one. Re-issuing
-  # there would turn SsoSession's absolute twelve-hour lifetime into a sliding
-  # one, which is the opposite of why that number was chosen.
-  def session_response(identity, sso_cookie: true)
+  # sso_bootstrap: false is for the code exchange, which is completing a login
+  # that already established a realm session rather than starting one. The
+  # browser redeeming a code demonstrably HAS the cookie -- that is how it got
+  # the code -- so handing it a way to establish another is pointless, and
+  # re-establishing one would turn SsoSession's absolute twelve-hour lifetime
+  # into a sliding one, which is the opposite of why that number was chosen.
+  def session_response(identity, sso_bootstrap: true)
     session, refresh_token = Session.issue!(
       identity: identity,
       client: Current.client,
       request: request,
       device_name: params[:device_name]
     )
-
-    # The realm-wide browser session, where the realm has asked for one.
-    #
-    # Here rather than in SessionsController because this method is reached by
-    # sign-in, sign-up AND mfa verification -- every path that accepts a
-    # credential and no other. In particular an MFA challenge does NOT come
-    # through here, so the cookie is never issued to someone who has given a
-    # password but not yet a second factor.
-    issue_sso_cookie!(identity) if sso_cookie
 
     issuer = TokenIssuer.new(identity: identity, client: Current.client, session: session)
 
@@ -69,6 +60,33 @@ module IssuesSessions
       # recovered afterwards by anyone, including whoever reads the database.
       refresh_token: refresh_token,
       refresh_token_expires_in: Session::REFRESH_TOKEN_TTL.to_i
+    }.merge(sso_bootstrap ? sso_bootstrap_fields(identity) : {})
+  end
+
+  # The realm-wide browser session is NOT established here, and cannot be.
+  #
+  # This response goes back to a cross-site XHR, and this server is on a
+  # different registrable domain from every application it serves. A cookie set
+  # from here is refused by Safari's tracking prevention and partitioned by
+  # Firefox's -- filed under the application's own top-level site, invisible to
+  # every other application in the realm, which is the only thing single sign-on
+  # is for. It would appear to work in whichever browser it was first tried in.
+  #
+  # So what goes back is a one-use token for the application to navigate with.
+  # The cookie is set at /sso/bootstrap, during a top-level navigation, where
+  # this server is first-party. See SsoBootstrap.
+  #
+  # Reached by sign-in, sign-up AND mfa verification -- every path that accepts a
+  # credential and no other. An MFA challenge does not come through here, so this
+  # is never handed to someone who has given a password but not a second factor.
+  def sso_bootstrap_fields(identity)
+    return {} unless Current.client.realm.sso?
+
+    _bootstrap, raw = SsoBootstrap.issue!(identity: identity, client: Current.client)
+
+    {
+      sso_bootstrap_token: raw,
+      sso_bootstrap_expires_in: SsoBootstrap::BOOTSTRAP_TTL.to_i
     }
   end
 end
