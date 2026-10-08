@@ -4,9 +4,11 @@ require "rails_helper"
 
 # GET /sso/authorize -- the only endpoint that reads the single sign-on cookie.
 #
-# It is silent or nothing: this server has no hosted login page, so /authorize
-# either answers from an existing realm session or returns login_required and
-# the application shows its own form.
+# With no session it redirects to the hosted login page, and with prompt=none
+# it answers login_required instead so an application can ask whether a
+# session exists without a form appearing. An earlier version of this comment
+# said the server had no hosted page; that stopped being true when the page
+# landed.
 #
 # Two properties dominate these specs. First, the ORDER of validation: nothing
 # is ever redirected until the redirect_uri is known to be registered to the
@@ -39,7 +41,7 @@ RSpec.describe "GET /sso/authorize" do
 
   def sign_in_browser(for_identity = identity)
     _session, raw = SsoSession.issue!(identity: for_identity)
-    cookies[SsoCookie::COOKIE_NAME] = raw
+    cookies[SsoCookie.cookie_name(realm)] = raw
   end
 
   def authorize(**overrides)
@@ -245,7 +247,7 @@ RSpec.describe "GET /sso/authorize" do
       [ "a garbage cookie", -> { SecureRandom.urlsafe_base64(32) } ]
     ].each do |description, build|
       it "offers the login page for #{description}" do
-        cookies[SsoCookie::COOKIE_NAME] = build.call
+        cookies[SsoCookie.cookie_name(realm)] = build.call
 
         authorize
 
@@ -271,7 +273,7 @@ RSpec.describe "GET /sso/authorize" do
     it "shows no form for a foreign-realm session either" do
       other = create(:identity, realm: create(:realm, sso_enabled: true))
       _s, raw = SsoSession.issue!(identity: other)
-      cookies[SsoCookie::COOKIE_NAME] = raw
+      cookies[SsoCookie.cookie_name(realm)] = raw
 
       authorize(prompt: "none")
 
@@ -331,7 +333,7 @@ RSpec.describe "GET /sso/authorize" do
       authorize
       with_foreign_session = [ response.status, location.path, query.key?("error") ]
 
-      cookies.delete(SsoCookie::COOKIE_NAME)
+      cookies.delete(SsoCookie.cookie_name(realm))
       authorize
 
       expect([ response.status, location.path, query.key?("error") ]).to eq(with_foreign_session)

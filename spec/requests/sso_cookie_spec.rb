@@ -45,7 +45,7 @@ RSpec.describe "the single sign-on cookie" do
   # The Set-Cookie line for our cookie, as the browser will receive it.
   def set_cookie_header
     Array(response.headers["Set-Cookie"]).flat_map { |h| h.split("\n") }
-                                        .find { |h| h.start_with?("#{SsoCookie::COOKIE_NAME}=") }
+                                        .find { |h| h.start_with?("#{SsoCookie.cookie_name(realm)}=") }
   end
 
   describe "when the realm has single sign-on enabled" do
@@ -95,7 +95,7 @@ RSpec.describe "the single sign-on cookie" do
       # Only the digest is persisted, so the header value must not appear in the
       # table. A dump of sso_sessions is then worth nothing on its own.
       it "sends a value the database does not contain" do
-        value = set_cookie_header[/#{SsoCookie::COOKIE_NAME}=([^;]+)/, 1]
+        value = set_cookie_header[/#{SsoCookie.cookie_name(realm)}=([^;]+)/, 1]
 
         expect(value).to be_present
         expect(SsoSession.where(token_digest: value)).to be_empty
@@ -151,7 +151,7 @@ RSpec.describe "the single sign-on cookie" do
   describe "what the cookie can be used for" do
     it "authenticates nothing: the API still demands a bearer token" do
       _session, raw = SsoSession.issue!(identity: identity)
-      cookies[SsoCookie::COOKIE_NAME] = raw
+      cookies[SsoCookie.cookie_name(realm)] = raw
 
       get "/api/apps/#{client.client_id}/auth/sessions", headers: origin
 
@@ -160,7 +160,7 @@ RSpec.describe "the single sign-on cookie" do
 
     it "cannot stand in for a bearer token on any authenticated route" do
       _session, raw = SsoSession.issue!(identity: identity)
-      cookies[SsoCookie::COOKIE_NAME] = raw
+      cookies[SsoCookie.cookie_name(realm)] = raw
 
       [
         [ :get, "auth/sessions" ],
@@ -209,7 +209,7 @@ RSpec.describe "the single sign-on cookie" do
       # A clearing Set-Cookie has to carry the same path, or the browser keeps
       # the original and only shadows it.
       expect(set_cookie_header).to match(%r{path=/sso}i)
-      expect(set_cookie_header).to match(/\A#{SsoCookie::COOKIE_NAME}=;/)
+      expect(set_cookie_header).to match(/\A#{SsoCookie.cookie_name(realm)}=;/)
       # An expiry in the past is what actually removes it.
       expect(set_cookie_header).to match(/expires=Thu, 01 Jan 1970/i)
     end
@@ -252,7 +252,7 @@ RSpec.describe "the single sign-on cookie" do
       names = Array(response.headers["Set-Cookie"]).flat_map { |h| h.split("\n") }
                                                    .map { |h| h[/\A([^=]+)=/, 1] }
 
-      expect(names).to eq([ SsoCookie::COOKIE_NAME ])
+      expect(names).to eq([ SsoCookie.cookie_name(realm) ])
     end
   end
 end

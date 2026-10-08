@@ -390,7 +390,7 @@ RSpec.describe "the hosted login page" do
         .to change { identity.sso_sessions.active.count }.by(1)
 
       set_cookie = Array(response.headers["Set-Cookie"]).flat_map { |h| h.split("\n") }
-                                                        .find { |h| h.start_with?("identity_sso=") }
+                                                        .find { |h| h.start_with?("#{SsoCookie.cookie_name(realm)}=") }
       expect(set_cookie).to match(/;\s*HttpOnly/i)
       expect(set_cookie).to match(/;\s*SameSite=Lax/i)
       expect(set_cookie).to match(%r{;\s*path=/sso}i)

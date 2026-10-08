@@ -105,7 +105,7 @@ module Sso
       # looked at and this goes straight to the form.
       return offer_login(client) if requested["prompt"] == "login"
 
-      session = sso_session_from_cookie
+      session = sso_session_from_cookie(client.realm)
       return offer_login(client) if session.nil?
 
       # The cross-realm check, and the reason SsoSession.authenticate takes no
