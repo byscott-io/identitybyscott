@@ -44,7 +44,7 @@ RSpec.describe "POST /api/apps/:client_id/auth/token" do
   # code comes back in the Location.
   def code_from_authorize(for_identity: identity, app: client, uri: callback)
     _session, raw = SsoSession.issue!(identity: for_identity)
-    cookies[SsoCookie::COOKIE_NAME] = raw
+    cookies[SsoCookie.cookie_name(realm)] = raw
 
     get "/sso/authorize", params: {
       client_id: app.client_id, redirect_uri: uri, response_type: "code",

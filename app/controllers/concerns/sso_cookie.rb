@@ -27,7 +27,45 @@ module SsoCookie
   # Domain -- all of which we want -- but it also mandates `Path=/`, and the
   # path restriction below is worth more than the prefix. A cookie the browser
   # never attaches to a credential endpoint cannot be misused by one.
-  COOKIE_NAME = "identity_sso"
+  # ONE COOKIE PER REALM, named for it.
+  #
+  # A single shared name would give every realm one slot on this host, and the
+  # second realm's sign-in would evict the first's. Not a leak -- /authorize
+  # refuses a cookie whose identity belongs to another realm and shows the form
+  # instead -- but single sign-on would silently stop working for whichever
+  # realm a browser touched least recently, which is worse than failing loudly.
+  #
+  # Both cookies are sent on every request here, since they share this host and
+  # path. The server reads only the one belonging to the client's realm, which
+  # it always knows first: /authorize validates client_id and loads the Client
+  # before it touches a cookie, and the login page carries the client in its
+  # signed authorization payload.
+  #
+  # Realm keys are validated as /\A[a-z0-9][a-z0-9_-]*\z/, so they are already
+  # safe in a cookie name without escaping.
+  COOKIE_PREFIX = "identity_sso_"
+
+  # The keys a realm may contribute to a cookie name. Deliberately the same
+  # shape Realm validates, restated here because that validation is model-level:
+  # update_column and raw SQL both bypass it, and this is the one place a key
+  # becomes part of an HTTP header.
+  #
+  # Rack already refuses a malformed cookie name, so a bad key fails closed with
+  # an ArgumentError rather than injecting header content. This checks anyway, so
+  # the failure names the realm and the reason instead of surfacing as "invalid
+  # cookie key" from inside Rack.
+  SAFE_KEY = /\A[a-z0-9][a-z0-9_-]*\z/
+
+  def self.cookie_name(realm)
+    raise ArgumentError, "a realm is required to name the single sign-on cookie" if realm.nil?
+
+    key = realm.key.to_s
+    unless key.match?(SAFE_KEY)
+      raise ArgumentError, "realm #{realm.id.inspect} has a key that cannot be used in a cookie name"
+    end
+
+    "#{COOKIE_PREFIX}#{key}"
+  end
 
   # Everything under here, and nothing else, ever sees this cookie.
   #
@@ -51,8 +89,12 @@ module SsoCookie
   # SOME realm, and the caller must check that realm against the client it is
   # answering. SsoSession.authenticate deliberately takes no client for that
   # reason.
-  def sso_session_from_cookie
-    SsoSession.authenticate(cookies[COOKIE_NAME])
+  # Takes the realm rather than searching, so a caller cannot accidentally read
+  # some other realm's session. There is deliberately no "find any session"
+  # variant: every question about a browser's session is a question about one
+  # realm.
+  def sso_session_from_cookie(realm)
+    SsoSession.authenticate(cookies[SsoCookie.cookie_name(realm)])
   end
 
   # Issues the realm-wide browser session, but only where the realm asked for
@@ -63,7 +105,7 @@ module SsoCookie
 
     sso_session, raw = SsoSession.issue!(identity: identity, request: request)
 
-    cookies[COOKIE_NAME] = sso_cookie_attributes.merge(
+    cookies[SsoCookie.cookie_name(identity.realm)] = sso_cookie_attributes.merge(
       value: raw,
 
       # An explicit expiry, matching the row's. A session cookie (no expiry)
@@ -105,7 +147,10 @@ module SsoCookie
     # Writing the header directly clears it regardless. The path has to match
     # the one it was set with, or the browser keeps the original and the
     # deletion only shadows it at a different path.
-    response.delete_cookie(COOKIE_NAME, path: COOKIE_PATH)
+    # Only this realm's cookie. Signing out of one realm says nothing about the
+    # others, and the rows revoked above are this identity's, which belong to
+    # exactly one realm.
+    response.delete_cookie(SsoCookie.cookie_name(identity.realm), path: COOKIE_PATH)
 
     revoked.length
   end
