@@ -49,12 +49,15 @@ class WellKnownController < ApplicationController
       # verifier alongside the code it is meant to protect.
       code_challenge_methods_supported: [ AuthorizationCode::CHALLENGE_METHOD ],
 
-      # none and login, and nothing else -- NOT because the others are
-      # unimplemented but because this server has no hosted login page and no
-      # HTML, so it cannot prompt at all. /authorize either answers from an
-      # existing realm session or returns login_required for the application to
-      # handle with its own form. Saying so here is the honest thing: a client
-      # that expects to force a prompt should learn otherwise from discovery.
+      # none and login. Both are genuinely implemented: prompt=none answers
+      # from an existing realm session or returns login_required without a
+      # form, and prompt=login skips the cookie and goes straight to the
+      # hosted login page.
+      #
+      # consent and select_account are NOT advertised because there is no
+      # consent screen and no account picker here -- a client that expects
+      # either should learn otherwise from discovery rather than from a
+      # redirect that silently did something else.
       prompt_values_supported: %w[none login],
       id_token_signing_alg_values_supported: [ SigningKeys::ALGORITHM ],
       # Credential endpoints are this server's own API rather than OAuth grants.

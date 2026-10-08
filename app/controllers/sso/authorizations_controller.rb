@@ -5,13 +5,18 @@ module Sso
   #
   # It answers one question: does this browser already hold a realm session that
   # entitles it to a code for this application? If yes it redirects back with an
-  # authorization code; if no it redirects back with `login_required` and the
-  # application shows its own sign-in form.
+  # authorization code. If no, what happens next depends on `prompt`:
   #
-  # IT NEVER PROMPTS, because there is nothing here to prompt with. This server
-  # has no hosted login page and no HTML -- applications render every form -- so
-  # "silent or not at all" is not a simplification of OIDC, it is the only
-  # behaviour this design can honestly offer. `prompt_values_supported` says so.
+  #   * no prompt    -- redirect to the hosted login form, then back with a code
+  #   * prompt=none  -- redirect back with `login_required` and no form, so an
+  #                     application can ask "is there a session?" silently
+  #   * prompt=login -- go straight to the form without reading the cookie
+  #
+  # The hosted form is what makes the first of those possible. An earlier version
+  # of this comment said this server never prompts because it had no HTML; that
+  # stopped being true when the login page landed, and a stale comment on the one
+  # endpoint that reads the session cookie is worse than no comment at all.
+  # `prompt_values_supported` in the discovery document is the authority.
   #
   # This is also the FIRST endpoint here reached with an ambient credential: the
   # cookie rides a top-level navigation, so a cross-site link can cause this
