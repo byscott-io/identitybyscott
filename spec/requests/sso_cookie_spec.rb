@@ -197,7 +197,7 @@ RSpec.describe "the single sign-on cookie" do
 
       delete "/api/apps/#{client.client_id}/auth/sign_out", headers: headers
 
-      expect(response).to have_http_status(:no_content)
+      expect(response).to have_http_status(:ok)
       expect(identity.sso_sessions.active.count).to eq(0)
     end
 

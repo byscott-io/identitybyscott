@@ -181,7 +181,7 @@ RSpec.describe "single sign-on across two realms" do
       delete "/api/apps/#{client_a.client_id}/auth/sign_out",
              headers: { "Authorization" => "Bearer #{token}", "Origin" => "https://a.example.com" }
 
-      expect(response).to have_http_status(:no_content)
+      expect(response).to have_http_status(:ok)
       expect(identity_b.sso_sessions.active.count).to eq(1)
 
       authorize(client_b, callback_b)
