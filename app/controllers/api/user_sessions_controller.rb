@@ -51,19 +51,42 @@ module Api
     # sessions existed, or one without a sid. Logging out is idempotent, and the
     # client drops its copy either way.
     def sign_out
-      current_session&.revoke!
-
-      # The realm session goes too, for the reason spelled out on
-      # revoke_sso_sessions!: if it survived, the application would bounce
-      # through /authorize and sign the person straight back in, and signing
-      # out would mean nothing.
+      # EVERY session for this identity, not only the one that asked.
       #
-      # The other applications in the realm are NOT signed out -- each keeps
-      # its own refresh token. What is gone is the ability to reach a new one
-      # without a password.
+      # An earlier version revoked the calling application's session and the
+      # realm session, and said the other applications kept their own refresh
+      # tokens but had lost "the ability to reach a new one without a password".
+      # That was wrong, and the comment is the reason to spell it out: refreshing
+      # checks the session row and the grant and never looks at the realm
+      # session, so another application went on minting access tokens from its
+      # own refresh token for up to its 30 days. Signing out of one application
+      # left the others signed in, not for fifteen minutes, but for a month.
+      #
+      # It was also incoherent. The realm session is revoked for the whole
+      # identity, on every device, while each application's own session survived
+      # -- global in one direction and local in the other, which is not a
+      # position anybody chose.
+      #
+      # So sign-out means signed out. The cost is that it is coarse: signing out
+      # on one device signs out on all of them. That is the same coarseness
+      # revoke_sso_sessions! already had, now applied consistently.
+      #
+      # Residual: an access token already issued stays valid until it expires, up
+      # to ACCESS_TOKEN_TTL. Closing that needs the application to be told
+      # rather than to notice -- back-channel logout -- which is its own piece of
+      # work.
+      revoked = current_identity.sessions.active.to_a
+      revoked.each(&:revoke!)
+
+      # The realm session too. If it survived, the application would bounce
+      # through /authorize and sign the person straight back in, and signing out
+      # would mean nothing.
       revoke_sso_sessions!(current_identity)
 
-      render json: { post_logout_redirect_uri: post_logout_redirect }
+      render json: {
+        post_logout_redirect_uri: post_logout_redirect,
+        sessions_revoked: revoked.length
+      }
     end
 
     private
