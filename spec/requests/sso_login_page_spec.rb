@@ -106,8 +106,34 @@ RSpec.describe "the hosted login page" do
       expect(response.headers["Content-Security-Policy"]).to include("frame-ancestors 'none'")
     end
 
-    it "may post only to this server" do
+    # form-action is NOT only about where the form posts.
+    #
+    # Chrome and Safari check it across a redirect that FOLLOWS a form
+    # submission, and a successful sign-in answers with a cross-origin redirect
+    # to the application. With 'self' alone the browser silently blocks that
+    # redirect: the server sends a 303, nothing errors, nothing is logged, and
+    # the person stays on this page having just entered the right password.
+    #
+    # That happened on the first real sign-in in production.
+    it "may post to this server" do
       expect(response.headers["Content-Security-Policy"]).to include("form-action 'self'")
+    end
+
+    it "allows the redirect that follows a successful post" do
+      directive = response.headers["Content-Security-Policy"][/form-action ([^;]+)/, 1]
+
+      expect(directive).to include("https://app.example.com")
+    end
+
+    # Registered origins only, from the client record, so nothing in the request
+    # can widen it.
+    it "allows no origin the client has not registered" do
+      directive = response.headers["Content-Security-Policy"][/form-action ([^;]+)/, 1]
+
+      expect(directive).not_to include("evil")
+      expect(directive.split(/\s+/)).to all(satisfy { |src|
+        src == "form-action" || src == "'self'" || client.redirect_uris_list.any? { |u| u.start_with?(src) }
+      })
     end
 
     it "loads nothing by default and no remote images" do
