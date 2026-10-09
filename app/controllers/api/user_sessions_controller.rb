@@ -63,10 +63,33 @@ module Api
       # without a password.
       revoke_sso_sessions!(current_identity)
 
-      head :no_content
+      render json: { post_logout_redirect_uri: post_logout_redirect }
     end
 
     private
+
+    # Where the application should send somebody now.
+    #
+    # Answered here rather than left to the app so the destination is registered
+    # on the client record, which is what makes an override safe to accept at
+    # all: a requested URI is honoured only if registered, and an unregistered
+    # one falls back to the default. See Client#post_logout_redirect_for.
+    #
+    # The refusal is logged rather than returned. The session is already revoked
+    # by this point, so failing the response would leave somebody signed out
+    # looking at an error -- but a misconfigured application should not be
+    # silently humoured either.
+    def post_logout_redirect
+      requested = params[:post_logout_redirect_uri].presence
+
+      if Current.client.post_logout_redirect_refused?(requested)
+        Rails.logger.info(
+          "post_logout_redirect_uri not registered for #{Current.client.client_id}, using the default"
+        )
+      end
+
+      Current.client.post_logout_redirect_for(requested)
+    end
 
     # Field for field what corebyscott's SessionsList already renders, so the
     # component works against this server unchanged.

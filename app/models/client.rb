@@ -100,6 +100,39 @@ class Client < ApplicationRecord
       redirect_uris_list.include?(uri)
     end
 
+    def post_logout_redirect_uris_list
+      split_list(post_logout_redirect_uris)
+    end
+
+    # Where to send somebody after signing out, given what the caller asked for.
+    #
+    # Returns nil when there is nothing registered, which means the application
+    # decides for itself -- this server has no opinion about an app that never
+    # told it one.
+    #
+    # A requested URI is honoured only if it is REGISTERED, by the same exact
+    # string equality redirect_uris uses. An unregistered one falls back to the
+    # default rather than failing the sign-out: the session is already revoked
+    # by the time this is asked, and refusing here would leave somebody signed
+    # out with an error instead of signed out. The caller logs the rejection, so
+    # a misconfigured app is visible rather than silently redirected elsewhere.
+    #
+    # Unvalidated, this would be an open redirect on the one endpoint whose link
+    # people mail to each other.
+    def post_logout_redirect_for(requested)
+      registered = post_logout_redirect_uris_list
+      return nil if registered.empty?
+      return requested if requested.present? && registered.include?(requested)
+
+      registered.first
+    end
+
+    # Whether a requested URI was refused, so the caller can say so in a log
+    # without re-deriving the comparison.
+    def post_logout_redirect_refused?(requested)
+      requested.present? && !post_logout_redirect_uris_list.include?(requested)
+    end
+
   private
 
   def split_list(value)

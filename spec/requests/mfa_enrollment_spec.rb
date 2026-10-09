@@ -192,7 +192,7 @@ RSpec.describe "MFA enrollment" do
     it "accepts and returns no content" do
       delete "/api/apps/#{client.client_id}/auth/sign_out", headers: authed
 
-      expect(response).to have_http_status(:no_content)
+      expect(response).to have_http_status(:ok)
     end
   end
 end

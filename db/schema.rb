@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_07_120246) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_09_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -50,6 +50,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_120246) do
     t.jsonb "theme", default: {}, null: false
     t.binary "theme_logo_data"
     t.string "theme_logo_content_type"
+    t.text "post_logout_redirect_uris"
     t.index ["client_id"], name: "index_clients_on_client_id", unique: true
     t.index ["realm_id", "name"], name: "index_clients_on_realm_id_and_name", unique: true
     t.index ["realm_id"], name: "index_clients_on_realm_id"

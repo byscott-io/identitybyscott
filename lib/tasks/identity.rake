@@ -133,6 +133,55 @@ namespace :identity do
       client.redirect_uris_list.each { |u| puts "  #{u}" }
     end
 
+    desc <<~DESC
+      Register where to send somebody after signing out.
+        CLIENT_ID=churchcare URI=https://churchcare.net/
+
+      The FIRST one registered is the default. A sign-out call may name any
+      registered one; an unregistered one falls back to the default, because an
+      unvalidated redirect here would be an open redirect on a link people mail
+      to each other.
+
+      It must be a PUBLIC page. Sending somebody to a route behind the app's own
+      auth guard puts them back on a login form, which is the problem this
+      exists to fix.
+    DESC
+    task add_post_logout_redirect_uri: :environment do
+      client = Client.find_by!(client_id: ENV.fetch("CLIENT_ID"))
+      uri = ENV.fetch("URI")
+
+      parsed = begin
+        URI.parse(uri)
+      rescue URI::InvalidURIError
+        nil
+      end
+      abort "not an absolute http(s) URI: #{uri}" unless parsed.is_a?(URI::HTTPS) || parsed&.scheme == "http"
+
+      if client.post_logout_redirect_uris_list.include?(uri)
+        puts "already registered: #{uri}"
+        next
+      end
+
+      client.update!(
+        post_logout_redirect_uris: (client.post_logout_redirect_uris_list + [ uri ]).join(" ")
+      )
+      puts "#{client.client_id} sends people here after signing out:"
+      client.post_logout_redirect_uris_list.each_with_index do |u, idx|
+        puts "  #{u}#{idx.zero? ? '  (default)' : ''}"
+      end
+    end
+
+    desc "Remove a post-logout redirect. CLIENT_ID=churchcare URI=https://churchcare.net/"
+    task remove_post_logout_redirect_uri: :environment do
+      client = Client.find_by!(client_id: ENV.fetch("CLIENT_ID"))
+      uri = ENV.fetch("URI")
+
+      client.update!(
+        post_logout_redirect_uris: (client.post_logout_redirect_uris_list - [ uri ]).join(" ")
+      )
+      puts "#{client.client_id} now sends people to: #{client.post_logout_redirect_uris_list.inspect}"
+    end
+
     desc "Remove a redirect URI. CLIENT_ID=churchcare URI=https://churchcare.net/auth/callback"
     task remove_redirect_uri: :environment do
       client = Client.find_by!(client_id: ENV.fetch("CLIENT_ID"))

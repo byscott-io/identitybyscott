@@ -316,7 +316,7 @@ RSpec.describe "central session management" do
 
       delete "/api/apps/#{client.client_id}/auth/sign_out", headers: authed(token)
 
-      expect(response).to have_http_status(:no_content)
+      expect(response).to have_http_status(:ok)
       expect(Session.find(claims(token)["sid"])).to be_revoked
 
       post "/api/apps/#{client.client_id}/auth/refresh",
