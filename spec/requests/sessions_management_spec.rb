@@ -324,15 +324,37 @@ RSpec.describe "central session management" do
       expect(response).to have_http_status(:unauthorized)
     end
 
-    it "leaves OTHER sessions alone -- signing out here is not signing out everywhere" do
+    # Reversed deliberately. This used to assert that signing out of one
+    # application left the others signed in, and that was the behaviour -- but
+    # it was both wrong and incoherent.
+    #
+    # Wrong because the comment claimed the others had lost "the ability to
+    # reach a new one without a password", and refreshing checks the session row
+    # and the grant and never looks at the realm session. So another application
+    # kept minting access tokens from its own refresh token for up to 30 days.
+    # Signing out of one application left the others signed in for a month.
+    #
+    # Incoherent because the realm session was already revoked for the whole
+    # identity on every device, while each application's own session survived.
+    it "signs the identity out of EVERY application, not only this one" do
       other_raw = sign_in(other_client)["refresh_token"]
       token = sign_in["access_token"]
 
       delete "/api/apps/#{client.client_id}/auth/sign_out", headers: authed(token)
+      expect(response).to have_http_status(:ok)
 
       post "/api/apps/#{other_client.client_id}/auth/refresh",
            params: { refresh_token: other_raw }, headers: origin(other_client)
-      expect(response).to have_http_status(:ok)
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    it "says how many sessions it revoked" do
+      sign_in(other_client)
+      token = sign_in["access_token"]
+
+      delete "/api/apps/#{client.client_id}/auth/sign_out", headers: authed(token)
+
+      expect(response.parsed_body["sessions_revoked"]).to eq(2)
     end
 
     it "now requires authentication, instead of answering 204 to anyone" do
