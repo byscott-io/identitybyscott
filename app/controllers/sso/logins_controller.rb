@@ -242,12 +242,62 @@ module Sso
         "style-src 'nonce-#{style_nonce}'",
         # data: for an inline logo; 'self' for one served from here.
         "img-src 'self' data:",
-        # The form may post to this server and nowhere else.
-        "form-action 'self'",
+        form_action,
         # Never embedded -- an embedded login page cannot show whose it is.
         "frame-ancestors 'none'",
         "base-uri 'none'"
       ].join("; ")
+    end
+
+    # 'self' for the POST, PLUS the origins of this client's registered redirect
+    # URIs.
+    #
+    # Those origins are not optional decoration. A successful POST answers with a
+    # cross-origin redirect to the application, and Chrome and Safari check
+    # form-action across a redirect that follows a form submission -- so with
+    # 'self' alone the browser silently BLOCKS that redirect and the person stays
+    # on this page having just entered the correct password. Nothing is logged,
+    # because nothing failed: the server sent a 303 and the browser declined to
+    # follow it.
+    #
+    # Found in production on the first real sign-in. The symptom was that a code
+    # was minted and the callback never arrived.
+    #
+    # Only REGISTERED origins, taken from the client record, so this cannot be
+    # widened by anything in the request -- and they are already the only places
+    # an authorization code may be delivered, so allowing a redirect there adds
+    # no reach.
+    def form_action
+      ([ "form-action 'self'" ] + redirect_origins).join(" ")
+    end
+
+    def redirect_origins
+      Array(csp_client&.redirect_uris_list).filter_map { |uri| origin_of(uri) }.uniq
+    end
+
+    def origin_of(uri)
+      parsed = URI.parse(uri)
+      return nil if parsed.scheme.blank? || parsed.host.blank?
+
+      port = parsed.port && parsed.port != parsed.default_port ? ":#{parsed.port}" : ""
+      "#{parsed.scheme}://#{parsed.host}#{port}"
+    rescue URI::InvalidURIError
+      nil
+    end
+
+    # Resolved here as well as in the action, because the header is set by a
+    # before_action and the action has not run yet. Failing closed to no extra
+    # origins: an unreadable authorization means this page is about to render the
+    # expired notice, which redirects nowhere.
+    def csp_client
+      return @csp_client if defined?(@csp_client)
+
+      @csp_client = begin
+        pending = PendingAuthorization.decode(params[:authorization])
+        Client.active.find_by(client_id: pending[:client_id])
+      rescue PendingAuthorization::Invalid
+        nil
+      end
     end
 
     def style_nonce
