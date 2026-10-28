@@ -67,3 +67,7 @@ env:
     - IDENTITY_SIGNING_KEY
     - IDENTITY_ISSUER
     - MAILER_SENDER
+    # Gates commit_sha on /api/health. Equal to this tool's monitoring key, so
+    # the uptime monitor's bearer token is accepted and a stale deploy becomes
+    # visible; without it the endpoint still answers liveness, just no commit.
+    - HEALTH_CHECK_SECRET

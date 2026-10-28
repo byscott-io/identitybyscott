@@ -96,6 +96,7 @@ jobs:
           IDENTITY_SIGNING_KEY: ${{ secrets.IDENTITY_SIGNING_KEY }}
           IDENTITY_ISSUER: ${{ secrets.IDENTITY_ISSUER }}
           MAILER_SENDER: ${{ secrets.MAILER_SENDER }}
+          HEALTH_CHECK_SECRET: ${{ secrets.HEALTH_CHECK_SECRET }}
           REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
         run: |
           mkdir -p .kamal
@@ -106,6 +107,7 @@ jobs:
             printf 'IDENTITY_SIGNING_KEY=%s\n' "$IDENTITY_SIGNING_KEY"
             printf 'IDENTITY_ISSUER=%s\n' "$IDENTITY_ISSUER"
             printf 'MAILER_SENDER=%s\n' "$MAILER_SENDER"
+            printf 'HEALTH_CHECK_SECRET=%s\n' "$HEALTH_CHECK_SECRET"
             printf 'DEPLOY_REGISTRY_ACCOUNT=%s\n' "$DEPLOY_REGISTRY_ACCOUNT"
           } > .kamal/secrets
           chmod 600 .kamal/secrets
