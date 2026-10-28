@@ -92,7 +92,14 @@ Rails.application.routes.draw do
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
   # Can be used by load balancers and uptime monitors to verify that the app is live.
+  #
+  # Kamal's container healthcheck uses this one. It answers HTML, so it cannot
+  # carry a deployed commit -- see /api/health below, which exists for that.
   get "up" => "rails/health#show", as: :rails_health_check
+
+  # Liveness as JSON, plus the deployed commit to an authorized caller. Outside
+  # the api/apps/:client_id scope on purpose: no client, no origin allowlist.
+  get "api/health", to: "api/health#show"
 
   # Defines the root path route ("/")
   # root "posts#index"
