@@ -39,3 +39,4 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CLAUDE_APP_ID: ${{ secrets.CLAUDE_APP_ID }}
       CLAUDE_APP_PRIVATE_KEY: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+      METRICSBYSCOTT_API_KEY: ${{ secrets.METRICSBYSCOTT_API_KEY }}
