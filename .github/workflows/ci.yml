@@ -28,6 +28,24 @@ jobs:
         # still readable. Cheap while the history is short; revisit if it grows.
         run: ruby bin/check-public-safe --history
 
+  scan_ruby:
+    name: Scan Ruby
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+
+      - name: Scan for known security vulnerabilities in gems used
+        run: bin/bundler-audit
+
+      - name: Scan for common Rails security vulnerabilities using static analysis
+        run: bin/brakeman --no-pager
+
   rubocop:
     name: RuboCop
     runs-on: ubuntu-latest
