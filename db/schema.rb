@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_09_020000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_06_001538) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -124,10 +124,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_09_020000) do
     t.datetime "revoked_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.uuid "sso_session_id"
     t.index ["client_id"], name: "index_sessions_on_client_id"
     t.index ["identity_id", "revoked_at"], name: "index_sessions_on_identity_id_and_revoked_at"
     t.index ["identity_id"], name: "index_sessions_on_identity_id"
     t.index ["refresh_token_digest"], name: "index_sessions_on_refresh_token_digest", unique: true
+    t.index ["sso_session_id"], name: "index_sessions_on_sso_session_id"
   end
 
   create_table "solid_cache_entries", force: :cascade do |t|

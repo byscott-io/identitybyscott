@@ -7,10 +7,16 @@
 # one application, while this says "whoever holds this cookie is this person"
 # to every application in the realm. Everything below follows from that.
 #
-# NOTHING READS THIS YET. `/authorize` does not exist, no controller consults
-# the cookie, and no request is authenticated by it. It is issued and revoked
-# now so the credential's lifetime and revocation are settled before anything
-# depends on them.
+# `/sso/authorize` reads it, and only it -- the cookie's path scope keeps it
+# away from every credential and API endpoint. An earlier version of this
+# comment said nothing read it and that /authorize did not exist; both stopped
+# being true when that endpoint landed, and a stale claim on the widest
+# credential this server issues is worse than no comment.
+#
+# It also groups the application sessions it authorised, which is what lets a
+# sessions list show devices rather than application-and-device pairs. Grouping
+# is all it does there: each application still holds its own client-scoped
+# refresh token, so this cookie cannot be exchanged for one.
 class SsoSession < ApplicationRecord
   # Deliberately far shorter than Session::REFRESH_TOKEN_TTL's 30 days.
   #
@@ -30,6 +36,13 @@ class SsoSession < ApplicationRecord
   # Codes die with the session they were minted from, so signing out reaches
   # one already in flight rather than leaving it redeemable.
   has_many :authorization_codes, dependent: :destroy
+
+  # The application sessions this browser session authorised.
+  #
+  # No dependent: option on purpose. Destroying this row must not delete the
+  # refresh-token rows a sessions list and an audit trail depend on, and
+  # revocation here revokes rather than deletes -- see #revoke!.
+  has_many :sessions, inverse_of: :sso_session
 
   validates :token_digest, presence: true, uniqueness: true
   validates :expires_at, presence: true
@@ -82,10 +95,23 @@ class SsoSession < ApplicationRecord
     end
   end
 
+  # Revokes this browser session AND the application sessions it authorised.
+  #
+  # Cascading is the point rather than a convenience. Without it, revoking a
+  # device would end the browser session while every application refresh token
+  # minted on that device stayed live for up to thirty days -- so "sign this
+  # laptop out" would leave the laptop signed in, which is the failure a
+  # device list exists to prevent.
+  #
+  # Scoped to active rows so a second call cannot overwrite the time an
+  # earlier revocation recorded.
   def revoke!
     return if revoked_at.present?
 
-    update!(revoked_at: Time.current)
+    transaction do
+      update!(revoked_at: Time.current)
+      sessions.active.each(&:revoke!)
+    end
   end
 
   def revoked?

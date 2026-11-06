@@ -73,6 +73,11 @@ Rails.application.routes.draw do
     delete "auth/sessions", to: "user_sessions#destroy_all"
     delete "auth/sessions/:id", to: "user_sessions#destroy"
 
+    # Revoking a whole device, which neither of the two above could express: one
+    # ends a single application on a device, the other ends everything
+    # everywhere. The id is a device_id as the sessions list reports it.
+    delete "auth/devices/:id", to: "user_sessions#destroy_device"
+
     get "auth/mfa", to: "mfa_enrollment#show"
     post "auth/mfa/setup", to: "mfa_enrollment#setup"
     post "auth/mfa/enable", to: "mfa_enrollment#enable"

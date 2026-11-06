@@ -7,9 +7,14 @@
 # attributes below are stated once rather than copied to a second caller and
 # quietly weakened there.
 #
-# NOTHING READS THIS COOKIE. No controller consults it, no request is
-# authenticated by it, and `/authorize` does not exist. It is issued now so its
-# shape, lifetime and revocation are settled before anything depends on them.
+# `/sso/authorize` is the only endpoint that reads this cookie, and the path
+# scope below is what keeps it that way: the browser never attaches it to a
+# credential endpoint, a token request or an authenticated API call.
+#
+# An earlier version of this comment said nothing read the cookie and that
+# /authorize did not exist. Both stopped being true when that endpoint landed,
+# and a stale claim about who can see the widest credential this server issues
+# is worse than no comment.
 module SsoCookie
   extend ActiveSupport::Concern
 

@@ -72,7 +72,10 @@ module Api
       # would push the realm session's expiry out again, and the bound window
       # that lifetime was chosen to provide would never close for an active
       # browser.
-      render json: session_response(code.identity, sso_cookie: false)
+      # The browser session comes from the code rather than being minted: this
+      # is completing a login that already established one. That is also what
+      # groups the row with the other applications opened in this browser.
+      render json: session_response(code.identity, sso_cookie: false, sso_session: code.sso_session)
     end
 
     private
