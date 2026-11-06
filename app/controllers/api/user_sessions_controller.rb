@@ -27,6 +27,39 @@ module Api
       render json: { revoked: 1 }
     end
 
+    # Revokes one DEVICE: every application session minted in that browser,
+    # plus the browser session itself.
+    #
+    # This fills the gap between the two endpoints either side of it. destroy
+    # ends one application on one device, leaving the others on that same
+    # device signed in -- not what anyone means by "sign this laptop out".
+    # destroy_all ends everything everywhere, which is more than they meant.
+    # Neither could express "this device".
+    #
+    # Takes a device id as the list reports it: a browser session id, or an
+    # ungrouped session own id. Both are accepted so a client can pass back
+    # whatever it was given without knowing which kind it holds.
+    def destroy_device
+      requested = params[:id].to_s
+
+      # Scoped to this identity rows, so another identity id is a 404 rather
+      # than a revocation -- the same rule as destroy.
+      grouped = current_identity.sessions.active.select { |s| s.device_group_id == requested }
+      sso_session = current_identity.sso_sessions.active.find_by(id: requested)
+
+      if grouped.empty? && sso_session.nil?
+        return render json: { error: "Not found" }, status: :not_found
+      end
+
+      # The browser session first: its revoke! cascades to the application
+      # sessions it authorised, so the loop below only has to catch a row that
+      # is named directly by its own id and has no browser session to cascade.
+      sso_session&.revoke!
+      grouped.each { |s| s.revoke! unless s.revoked? }
+
+      render json: { revoked: grouped.count { |s| s.reload.revoked? } }
+    end
+
     # Log out everywhere. Revokes every live session for this identity, across
     # every application and device in the realm -- which is the capability no
     # app could offer on its own, because none of them could see the others.
@@ -139,7 +172,20 @@ module Api
         # Which application this session belongs to. Core's list has no such
         # column because an app could only ever show its own; here the list spans
         # apps, so without this the rows are indistinguishable.
-        client_id: session.client.client_id
+        client_id: session.client.client_id,
+
+        # Which DEVICE this session belongs to, so a client can group the rows it
+        # is given. Without it, someone using three applications in one browser
+        # sees three entries and nothing saying they are one device.
+        #
+        # Additive: the list stays a flat array, so a client that ignores this
+        # behaves exactly as before. Grouping is a presentation choice, and the
+        # revoke-a-device endpoint does not depend on the client making it.
+        #
+        # Falls back to the session own id where there is no browser session, so
+        # an ungrouped row is a device of one rather than sharing a null group
+        # with every other ungrouped row.
+        device_id: session.device_group_id
       }
     end
   end

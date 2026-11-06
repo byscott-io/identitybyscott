@@ -41,14 +41,7 @@ module IssuesSessions
   # already established a realm session rather than starting one. Re-issuing
   # there would turn SsoSession's absolute twelve-hour lifetime into a sliding
   # one, which is the opposite of why that number was chosen.
-  def session_response(identity, sso_cookie: true)
-    session, refresh_token = Session.issue!(
-      identity: identity,
-      client: Current.client,
-      request: request,
-      device_name: params[:device_name]
-    )
-
+  def session_response(identity, sso_cookie: true, sso_session: nil)
     # The realm-wide browser session, where the realm has asked for one.
     #
     # Here rather than in SessionsController because this method is reached by
@@ -56,7 +49,23 @@ module IssuesSessions
     # credential and no other. In particular an MFA challenge does NOT come
     # through here, so the cookie is never issued to someone who has given a
     # password but not yet a second factor.
-    issue_sso_cookie!(identity) if sso_cookie
+    #
+    # BEFORE the application session below, not after, because that session is
+    # grouped by this one. Issuing the cookie afterwards would leave every row
+    # ungrouped and a device list would quietly go back to showing one entry per
+    # application -- a bug whose only symptom is a list that reads oddly.
+    sso_session ||= issue_sso_cookie!(identity) if sso_cookie
+
+    session, refresh_token = Session.issue!(
+      identity: identity,
+      client: Current.client,
+      request: request,
+      device_name: params[:device_name],
+
+      # nil where there is no browser session: single sign-on off for the realm,
+      # or a client that holds no cookie. Such a row groups as itself.
+      sso_session: sso_session
+    )
 
     issuer = TokenIssuer.new(identity: identity, client: Current.client, session: session)
 
