@@ -42,22 +42,30 @@ module Api
     def destroy_device
       requested = params[:id].to_s
 
-      # Scoped to this identity rows, so another identity id is a 404 rather
-      # than a revocation -- the same rule as destroy.
-      grouped = current_identity.sessions.active.select { |s| s.device_group_id == requested }
+      # Scoped to this identity rows, so another identity id is a 404 rather than
+      # a revocation -- the same rule as destroy.
+      scope = current_identity.sessions.active
+      grouped_ids = scope.where(sso_session_id: requested).or(scope.where(id: requested)).pluck(:id)
       sso_session = current_identity.sso_sessions.active.find_by(id: requested)
 
-      if grouped.empty? && sso_session.nil?
+      if grouped_ids.empty? && sso_session.nil?
         return render json: { error: "Not found" }, status: :not_found
       end
 
+      # Ids are captured BEFORE anything is revoked, because the scope above is
+      # `active` and would return fewer rows once the cascade below has run --
+      # which would make the reported count depend on the order of these two
+      # statements.
+      #
       # The browser session first: its revoke! cascades to the application
-      # sessions it authorised, so the loop below only has to catch a row that
-      # is named directly by its own id and has no browser session to cascade.
+      # sessions it authorised. The sweep that follows is re-read from the
+      # database rather than from objects loaded earlier, so a row the cascade
+      # already revoked is simply no longer `active` and is not written twice.
+      # Writing it twice would overwrite the timestamp the cascade recorded.
       sso_session&.revoke!
-      grouped.each { |s| s.revoke! unless s.revoked? }
+      current_identity.sessions.active.where(id: grouped_ids).find_each(&:revoke!)
 
-      render json: { revoked: grouped.count { |s| s.reload.revoked? } }
+      render json: { revoked: grouped_ids.size }
     end
 
     # Log out everywhere. Revokes every live session for this identity, across

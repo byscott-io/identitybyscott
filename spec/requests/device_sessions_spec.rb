@@ -221,6 +221,27 @@ RSpec.describe "device-grouped sessions" do
       expect(standalone.reload).to be_revoked
     end
 
+    # Raised in review: the earlier version loaded the rows before the cascade
+    # ran, then revoked them again from those stale objects -- overwriting the
+    # timestamp the cascade had just recorded. The sweep now re-reads from the
+    # database, so a row the cascade already revoked is no longer `active` and
+    # is left alone. Asserted as idempotency, which is the visible consequence.
+    it "does not rewrite the revocation time of a session already revoked" do
+      first = sign_in_via_sso(client)
+      sign_in_via_sso(second_client)
+      device_id = identity.sessions.first.device_group_id
+      auth = origin(client).merge("Authorization" => "Bearer #{first["access_token"]}")
+
+      delete "/api/apps/#{client.client_id}/auth/devices/#{device_id}", headers: auth
+      first_times = identity.sessions.order(:created_at).map { |s| s.reload.revoked_at }
+
+      delete "/api/apps/#{client.client_id}/auth/devices/#{device_id}", headers: auth
+      second_times = identity.sessions.order(:created_at).map { |s| s.reload.revoked_at }
+
+      expect(first_times).to all(be_present)
+      expect(second_times).to eq(first_times)
+    end
+
     it "is a 404 for a device belonging to someone else" do
       other = create(:identity, realm: realm, signup_client: client, confirmed_at: Time.current)
       theirs = SsoSession.issue!(identity: other).first
