@@ -61,6 +61,6 @@ gem "rqrcode", ">= 2.0"
 gem "browser", ">= 6.0"
 
 group :development, :test do
-  gem "rspec-rails", "~> 8.0"
+  gem "rspec-rails", "~> 8.1"
   gem "factory_bot_rails"
 end
