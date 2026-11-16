@@ -92,6 +92,15 @@ RSpec.describe "the single sign-on cookie" do
         expect(set_cookie_header).to match(/;\s*expires=/i)
       end
 
+      # The row slides with activity and decides; the cookie must last as long
+      # as the row possibly can, or it would vanish from the browser while the
+      # session was still alive and single sign-on would stop after a day.
+      it "lasts as long as the browser session possibly can, not just its idle window" do
+        expires = Time.httpdate(set_cookie_header[/expires=([^;]+)/i, 1])
+
+        expect(expires).to be_within(1.minute).of(SsoSession::MAX_LIFETIME.from_now)
+      end
+
       # Only the digest is persisted, so the header value must not appear in the
       # table. A dump of sso_sessions is then worth nothing on its own.
       it "sends a value the database does not contain" do

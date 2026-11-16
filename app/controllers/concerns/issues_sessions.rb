@@ -39,8 +39,8 @@ module IssuesSessions
 
   # sso_cookie: false is for the code exchange, which is completing a login that
   # already established a realm session rather than starting one. Re-issuing
-  # there would turn SsoSession's absolute twelve-hour lifetime into a sliding
-  # one, which is the opposite of why that number was chosen.
+  # there would mint a second browser session for the same browser; the one
+  # that exists already slides with use (SsoSession#touch_used!).
   def session_response(identity, sso_cookie: true, sso_session: nil)
     # The realm-wide browser session, where the realm has asked for one.
     #

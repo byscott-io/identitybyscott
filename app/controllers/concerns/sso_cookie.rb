@@ -113,10 +113,14 @@ module SsoCookie
     cookies[SsoCookie.cookie_name(identity.realm)] = sso_cookie_attributes.merge(
       value: raw,
 
-      # An explicit expiry, matching the row's. A session cookie (no expiry)
-      # would outlive the row whenever a browser restores tabs, leaving a value
-      # that is presented and rejected rather than one that is gone.
-      expires: SsoSession::SSO_SESSION_TTL.from_now
+      # An explicit expiry: the row's LATEST possible end, MAX_LIFETIME. The row
+      # slides with activity (SsoSession#touch_used!) and is what decides; the
+      # cookie is never re-sent to extend, because the requests that extend it
+      # (an application's refresh) never reach this cookie. Set to the idle
+      # window instead, it would vanish from the browser while the row was
+      # still alive. A session cookie (no expiry) would outlive the row
+      # whenever a browser restores tabs.
+      expires: sso_session.max_expires_at
     )
 
     # Returned so a caller can bind what it issues to this browser session --
