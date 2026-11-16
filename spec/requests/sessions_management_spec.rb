@@ -324,37 +324,76 @@ RSpec.describe "central session management" do
       expect(response).to have_http_status(:unauthorized)
     end
 
-    # Reversed deliberately. This used to assert that signing out of one
-    # application left the others signed in, and that was the behaviour -- but
-    # it was both wrong and incoherent.
+    # Sign-out ends THIS DEVICE: the browser session the token was minted
+    # under and every application session it authorised. Another device keeps
+    # its sessions; ending those is the person's choice in a sessions list.
     #
-    # Wrong because the comment claimed the others had lost "the ability to
-    # reach a new one without a password", and refreshing checks the session row
-    # and the grant and never looks at the realm session. So another application
-    # kept minting access tokens from its own refresh token for up to 30 days.
-    # Signing out of one application left the others signed in for a month.
-    #
-    # Incoherent because the realm session was already revoked for the whole
-    # identity on every device, while each application's own session survived.
-    it "signs the identity out of EVERY application, not only this one" do
-      other_raw = sign_in(other_client)["refresh_token"]
-      token = sign_in["access_token"]
+    # Reversed deliberately, twice. It first left the other applications on the
+    # same device signed in for up to 30 days (refresh never checks the realm
+    # session). The fix for that revoked every session on every device, so
+    # signing out of a phone signed out a laptop too. Both were wrong.
+    describe "on one device of several" do
+      let(:this_browser) { SsoSession.issue!(identity: identity).first }
+      let(:other_browser) { SsoSession.issue!(identity: identity).first }
 
-      delete "/api/apps/#{client.client_id}/auth/sign_out", headers: authed(token)
-      expect(response).to have_http_status(:ok)
+      def session_in(browser, app = client)
+        session, raw = Session.issue!(identity: identity, client: app, sso_session: browser)
+        [ session, raw ]
+      end
 
-      post "/api/apps/#{other_client.client_id}/auth/refresh",
-           params: { refresh_token: other_raw }, headers: origin(other_client)
-      expect(response).to have_http_status(:unauthorized)
-    end
+      def token_for(session, app = client)
+        TokenIssuer.new(identity: identity, client: app, session: session).access_token
+      end
 
-    it "says how many sessions it revoked" do
-      sign_in(other_client)
-      token = sign_in["access_token"]
+      it "signs out every application on this device" do
+        here, = session_in(this_browser)
+        other_app_here, other_app_raw = session_in(this_browser, other_client)
 
-      delete "/api/apps/#{client.client_id}/auth/sign_out", headers: authed(token)
+        delete "/api/apps/#{client.client_id}/auth/sign_out", headers: authed(token_for(here))
 
-      expect(response.parsed_body["sessions_revoked"]).to eq(2)
+        expect(response).to have_http_status(:ok)
+        expect(here.reload).to be_revoked
+        expect(other_app_here.reload).to be_revoked
+        expect(this_browser.reload).to be_revoked
+
+        post "/api/apps/#{other_client.client_id}/auth/refresh",
+             params: { refresh_token: other_app_raw }, headers: origin(other_client)
+        expect(response).to have_http_status(:unauthorized)
+      end
+
+      it "leaves the identity's other devices signed in" do
+        here, = session_in(this_browser)
+        there, there_raw = session_in(other_browser)
+
+        delete "/api/apps/#{client.client_id}/auth/sign_out", headers: authed(token_for(here))
+
+        expect(there.reload).not_to be_revoked
+        expect(other_browser.reload).not_to be_revoked
+
+        post "/api/apps/#{client.client_id}/auth/refresh",
+             params: { refresh_token: there_raw }, headers: origin
+        expect(response).to have_http_status(:ok)
+      end
+
+      it "says how many sessions it revoked: this device's, and no more" do
+        here, = session_in(this_browser)
+        session_in(this_browser, other_client)
+        session_in(other_browser)
+
+        delete "/api/apps/#{client.client_id}/auth/sign_out", headers: authed(token_for(here))
+
+        expect(response.parsed_body["sessions_revoked"]).to eq(2)
+      end
+
+      it "treats a session with no browser session as a device of one" do
+        alone, = session_in(nil)
+        elsewhere, = session_in(nil)
+
+        delete "/api/apps/#{client.client_id}/auth/sign_out", headers: authed(token_for(alone))
+
+        expect(alone.reload).to be_revoked
+        expect(elsewhere.reload).not_to be_revoked
+      end
     end
 
     it "now requires authentication, instead of answering 204 to anyone" do
