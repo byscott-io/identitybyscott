@@ -36,6 +36,10 @@ module Api
       end
 
       session.touch_used!
+      # An application in use on this device keeps the device's single sign-on
+      # alive, so opening another application here needs no password. See
+      # SsoSession::IDLE_TIMEOUT.
+      session.sso_session&.touch_used!
 
       issuer = TokenIssuer.new(
         identity: session.identity, client: Current.client, session: session

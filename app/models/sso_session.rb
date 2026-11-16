@@ -18,18 +18,23 @@
 # is all it does there: each application still holds its own client-scoped
 # refresh token, so this cookie cannot be exchanged for one.
 class SsoSession < ApplicationRecord
-  # Deliberately far shorter than Session::REFRESH_TOKEN_TTL's 30 days.
+  # It lasts WHILE THE PERSON IS ACTIVE on this device, not a fixed time.
   #
-  # The usual instinct is to make an SSO session long, because that is what
-  # saves people from retyping passwords. It is the wrong instinct here: this
-  # cookie does not keep anyone signed in -- each application holds its own
-  # 30-day refresh token for that -- so a short lifetime costs an occasional
-  # password entry when someone opens an application they have not used today.
+  # It used to expire twelve hours after sign-in whatever happened. But each
+  # application holds its own 30-day refresh token, so someone could be signed
+  # in to one application all week and still be asked for a password the
+  # moment they opened a second one -- single sign-on that worked for half a
+  # day. That was the wrong trade for the people using it.
   #
-  # What a long lifetime would cost is the thing worth protecting against:
-  # silent authentication at applications the person never visited in this
-  # browser. Twelve hours bounds that to about a working day.
-  SSO_SESSION_TTL = 12.hours
+  # So it slides. IDLE_TIMEOUT is how long it survives with nothing on this
+  # device in use; every use extends it (#touch_used!): an /authorize, or a
+  # refresh by any application session it authorised, which a signed-in
+  # application does every few minutes. MAX_LIFETIME caps it absolutely, at an
+  # application session's own lifetime, so it can never outlast what it
+  # authorised. What still bounds silent sign-in at other applications is
+  # inactivity, and signing out, which ends this device (UserSessions#sign_out).
+  IDLE_TIMEOUT = 12.hours
+  MAX_LIFETIME = Session::REFRESH_TOKEN_TTL
 
   belongs_to :identity
 
@@ -67,7 +72,7 @@ class SsoSession < ApplicationRecord
         user_agent: request&.user_agent,
         ip_address: request&.remote_ip,
         last_used_at: Time.current,
-        expires_at: SSO_SESSION_TTL.from_now
+        expires_at: IDLE_TIMEOUT.from_now
       )
 
       [ session, raw ]
@@ -122,10 +127,22 @@ class SsoSession < ApplicationRecord
     revoked_at.nil? && expires_at.future?
   end
 
+  # Records a use and extends the idle window, up to MAX_LIFETIME from
+  # creation. A revoked or expired session is not revived: that would undo a
+  # sign-out, or let a session idle out and then come back.
+  #
+  # update_columns for the same reason Session does it: this runs on every
+  # /authorize and refresh and must not bump updated_at, which would make "last
+  # used" and "changed" indistinguishable.
   def touch_used!
-    # update_column for the same reason Session does it: this would run on every
-    # /authorize and must not bump updated_at, which would make "last used" and
-    # "changed" indistinguishable.
-    update_column(:last_used_at, Time.current)
+    return unless active?
+
+    now = Time.current
+    update_columns(last_used_at: now, expires_at: [ now + IDLE_TIMEOUT, created_at + MAX_LIFETIME ].min)
+  end
+
+  # When this browser session ends at the latest, whatever activity there is.
+  def max_expires_at
+    created_at + MAX_LIFETIME
   end
 end

@@ -67,11 +67,9 @@ module Api
       # sso_cookie: false. The realm session already exists -- this code was
       # minted from it and is bound to it -- so there is nothing to establish.
       #
-      # More importantly, issuing one here would quietly convert the twelve-hour
-      # absolute lifetime into a sliding one: every application a person opened
-      # would push the realm session's expiry out again, and the bound window
-      # that lifetime was chosen to provide would never close for an active
-      # browser.
+      # Issuing one here would also mint a second browser session for the same
+      # browser. The existing one slides with use instead (SsoSession#touch_used!,
+      # called by /authorize and by every refresh), up to MAX_LIFETIME.
       # The browser session comes from the code rather than being minted: this
       # is completing a login that already established one. That is also what
       # groups the row with the other applications opened in this browser.

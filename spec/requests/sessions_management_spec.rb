@@ -385,6 +385,21 @@ RSpec.describe "central session management" do
         expect(response.parsed_body["sessions_revoked"]).to eq(2)
       end
 
+      # An application in use keeps this device's single sign-on alive, so a
+      # second application opened here a day later needs no password.
+      it "keeps this device's single sign-on alive while an application refreshes" do
+        _here, raw = session_in(this_browser)
+
+        travel(SsoSession::IDLE_TIMEOUT - 1.hour) do
+          post "/api/apps/#{client.client_id}/auth/refresh", params: { refresh_token: raw }, headers: origin
+          expect(response).to have_http_status(:ok)
+        end
+
+        travel(SsoSession::IDLE_TIMEOUT + 6.hours) do
+          expect(this_browser.reload).to be_active
+        end
+      end
+
       it "treats a session with no browser session as a device of one" do
         alone, = session_in(nil)
         elsewhere, = session_in(nil)

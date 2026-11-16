@@ -38,14 +38,13 @@ RSpec.describe SsoSession do
       expect(values.uniq.length).to eq(5)
     end
 
-    # Far shorter than a refresh token's 30 days, and that gap is the point:
-    # this credential reaches every application in the realm, so it is the one
-    # whose lifetime should be measured in hours.
-    it "expires well before a refresh token would" do
+    # Starts with the idle window; activity slides it (see #touch_used!), never
+    # past an application session's own lifetime.
+    it "starts with the idle window, capped at an application session's lifetime" do
       session, = described_class.issue!(identity: identity)
 
-      expect(session.expires_at).to be_within(5.seconds).of(12.hours.from_now)
-      expect(described_class::SSO_SESSION_TTL).to be < Session::REFRESH_TOKEN_TTL
+      expect(session.expires_at).to be_within(5.seconds).of(described_class::IDLE_TIMEOUT.from_now)
+      expect(session.max_expires_at).to be_within(5.seconds).of(Session::REFRESH_TOKEN_TTL.from_now)
     end
 
     it "records the browser it was issued to" do
@@ -124,6 +123,49 @@ RSpec.describe SsoSession do
       described_class.issue!(identity: identity)
 
       expect { identity.destroy! }.to change(described_class, :count).by(-1)
+    end
+  end
+
+  # Single sign-on lasts while the person is active on this device: a browser
+  # signed in to one application all week must not ask for a password when
+  # they open a second one.
+  describe "#touch_used!" do
+    it "slides the idle window forward on use" do
+      session, = described_class.issue!(identity: identity)
+
+      travel 11.hours do
+        session.touch_used!
+        expect(session.reload.expires_at).to be_within(5.seconds).of(described_class::IDLE_TIMEOUT.from_now)
+      end
+    end
+
+    it "never extends past the cap, however active" do
+      session, = described_class.issue!(identity: identity)
+
+      travel(described_class::MAX_LIFETIME - 1.hour) do
+        session.update_columns(expires_at: 2.hours.from_now)
+        session.touch_used!
+        expect(session.reload.expires_at).to be_within(5.seconds).of(session.max_expires_at)
+      end
+    end
+
+    it "does not revive a revoked session, which would undo a sign-out" do
+      session, = described_class.issue!(identity: identity)
+      session.revoke!
+      before = session.reload.expires_at
+
+      session.touch_used!
+
+      expect(session.reload.expires_at).to eq(before)
+    end
+
+    it "does not revive one that has already idled out" do
+      session, = described_class.issue!(identity: identity)
+
+      travel(described_class::IDLE_TIMEOUT + 1.minute) do
+        session.touch_used!
+        expect(session.reload).not_to be_active
+      end
     end
   end
 end
