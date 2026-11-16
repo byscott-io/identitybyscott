@@ -124,19 +124,11 @@ module SsoCookie
     sso_session
   end
 
-  # Revokes every live SSO session for this identity and clears the cookie.
-  #
-  # Coarse on purpose, for now: the cookie is not readable here -- a sign-out
-  # arrives as an XHR to /api, which this cookie's path keeps it away from -- so
-  # the row for THIS browser cannot be singled out. Revoking all of them signs
-  # the identity out of the realm everywhere, including on another device.
-  #
-  # That errs toward asking for a password, which is the right direction to err,
-  # and it can be narrowed once /authorize can match the presented cookie to its
-  # row. The alternative -- leaving the realm session alive -- would make
-  # signing out of an application decorative: the application would redirect to
-  # /authorize, the cookie would still be good, and the person would be silently
-  # signed straight back in.
+  # Revokes every live SSO session for this identity, on every device, and
+  # clears this browser's cookie. For "log out everywhere" and other
+  # identity-wide events -- NOT ordinary sign-out, which ends only the device
+  # that asked (UserSessionsController#sign_out finds that device's browser
+  # session from the token's session, since the cookie never reaches /api).
   def revoke_sso_sessions!(identity)
     revoked = identity.sso_sessions.active.to_a
     revoked.each(&:revoke!)
@@ -155,9 +147,16 @@ module SsoCookie
     # Only this realm's cookie. Signing out of one realm says nothing about the
     # others, and the rows revoked above are this identity's, which belong to
     # exactly one realm.
-    response.delete_cookie(SsoCookie.cookie_name(identity.realm), path: COOKIE_PATH)
+    clear_sso_cookie!(identity.realm)
 
     revoked.length
+  end
+
+  # Clears this browser's realm cookie, which is all a sign-out reaching /api
+  # can do to the cookie. Only this realm's: signing out of one realm says
+  # nothing about the others.
+  def clear_sso_cookie!(realm)
+    response.delete_cookie(SsoCookie.cookie_name(realm), path: COOKIE_PATH)
   end
 
   def sso_cookie_attributes

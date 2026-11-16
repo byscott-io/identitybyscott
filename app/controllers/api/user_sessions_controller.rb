@@ -6,7 +6,8 @@ module Api
   # The point of holding these centrally: before this, each application kept its
   # own jwt_tokens table, so "list my sessions" meant "list my sessions in the
   # app I am looking at" and signing out of one said nothing about the others.
-  # Here every session for the identity is one list, and one call ends them all.
+  # Here every session for the identity is one list. Signing out ends this
+  # device; ending another device, or every device, is a separate choice.
   class UserSessionsController < AuthenticatedController
     include SsoCookie
 
@@ -52,18 +53,7 @@ module Api
         return render json: { error: "Not found" }, status: :not_found
       end
 
-      # Ids are captured BEFORE anything is revoked, because the scope above is
-      # `active` and would return fewer rows once the cascade below has run --
-      # which would make the reported count depend on the order of these two
-      # statements.
-      #
-      # The browser session first: its revoke! cascades to the application
-      # sessions it authorised. The sweep that follows is re-read from the
-      # database rather than from objects loaded earlier, so a row the cascade
-      # already revoked is simply no longer `active` and is not written twice.
-      # Writing it twice would overwrite the timestamp the cascade recorded.
-      sso_session&.revoke!
-      current_identity.sessions.active.where(id: grouped_ids).find_each(&:revoke!)
+      revoke_device!(grouped_ids, sso_session)
 
       render json: { revoked: grouped_ids.size }
     end
@@ -92,45 +82,69 @@ module Api
     # sessions existed, or one without a sid. Logging out is idempotent, and the
     # client drops its copy either way.
     def sign_out
-      # EVERY session for this identity, not only the one that asked.
+      # THIS DEVICE ONLY: the browser session the presented token was minted
+      # under, and every application session it authorised -- so every
+      # application on this device is signed out, and nothing else is.
       #
-      # An earlier version revoked the calling application's session and the
-      # realm session, and said the other applications kept their own refresh
-      # tokens but had lost "the ability to reach a new one without a password".
-      # That was wrong, and the comment is the reason to spell it out: refreshing
-      # checks the session row and the grant and never looks at the realm
-      # session, so another application went on minting access tokens from its
-      # own refresh token for up to its 30 days. Signing out of one application
-      # left the others signed in, not for fifteen minutes, but for a month.
+      # Another device keeps its own sessions. Ending those is the person's
+      # choice, made in an application's sessions list (destroy_device, or
+      # destroy_all for every device), never a side effect of signing out here.
       #
-      # It was also incoherent. The realm session is revoked for the whole
-      # identity, on every device, while each application's own session survived
-      # -- global in one direction and local in the other, which is not a
-      # position anybody chose.
+      # This replaces a sign-out that revoked EVERY session for the identity,
+      # on every device. That was done because signing out of one application
+      # used to leave the others, on the same device, signed in for up to 30
+      # days: refreshing checks the session row and the grant and never the
+      # realm session. Revoking the device's application sessions explicitly,
+      # as below, closes that without reaching other devices.
       #
-      # So sign-out means signed out. The cost is that it is coarse: signing out
-      # on one device signs out on all of them. That is the same coarseness
-      # revoke_sso_sessions! already had, now applied consistently.
+      # The device is found from the token, not the cookie: sign-out arrives as
+      # an XHR to /api, which the realm cookie's path keeps it away from. A
+      # session minted without a browser session (single sign-on off, or a
+      # client that holds no cookie) is a device of one, and only it is revoked.
       #
-      # Residual: an access token already issued stays valid until it expires, up
-      # to ACCESS_TOKEN_TTL. Closing that needs the application to be told
-      # rather than to notice -- back-channel logout -- which is its own piece of
-      # work.
-      revoked = current_identity.sessions.active.to_a
-      revoked.each(&:revoke!)
-
-      # The realm session too. If it survived, the application would bounce
-      # through /authorize and sign the person straight back in, and signing out
-      # would mean nothing.
-      revoke_sso_sessions!(current_identity)
+      # Residual: an access token already issued stays valid until it expires,
+      # up to ACCESS_TOKEN_TTL. Closing that needs back-channel logout.
+      revoked = sign_out_this_device!
 
       render json: {
         post_logout_redirect_uri: post_logout_redirect,
-        sessions_revoked: revoked.length
+        sessions_revoked: revoked
       }
     end
 
     private
+
+    # The device the presented token belongs to, revoked; returns how many
+    # application sessions that ended. A token with no sid names no session,
+    # so nothing is revoked -- the client drops its copy either way.
+    def sign_out_this_device!
+      session = current_session
+      # This browser's cookie goes either way: it IS this device, and leaving
+      # it would let /authorize sign the person straight back in.
+      clear_sso_cookie!(current_identity.realm)
+      return 0 if session.nil? || session.revoked?
+
+      group = session.device_group_id
+      scope = current_identity.sessions.active
+      ids = scope.where(sso_session_id: group).or(scope.where(id: group)).pluck(:id)
+      revoke_device!(ids, current_identity.sso_sessions.active.find_by(id: session.sso_session_id))
+      ids.size
+    end
+
+    # Ids are captured by the caller BEFORE anything is revoked, because the
+    # scope is `active` and would return fewer rows once the cascade below has
+    # run -- which would make the reported count depend on the order of these
+    # two statements.
+    #
+    # The browser session first: its revoke! cascades to the application
+    # sessions it authorised. The sweep that follows is re-read from the
+    # database rather than from objects loaded earlier, so a row the cascade
+    # already revoked is simply no longer `active` and is not written twice.
+    # Writing it twice would overwrite the timestamp the cascade recorded.
+    def revoke_device!(session_ids, sso_session)
+      sso_session&.revoke!
+      current_identity.sessions.active.where(id: session_ids).find_each(&:revoke!)
+    end
 
     # Where the application should send somebody now.
     #

@@ -161,7 +161,11 @@ Running. What works:
   row, so the list spans every application and device rather than showing only
   the app you happen to be looking at -- which is what no application could do
   alone, because none of them can see the others. One call revokes them all.
-  `sign_out` revokes the session its own token was minted from. Refresh tokens
+  `sign_out` ends THIS DEVICE: the browser session its token was minted under
+  and every application session that browser session authorised, so every
+  application on this device is signed out and other devices are not. Ending
+  another device, or every device, is the person's choice in a sessions list
+  (`DELETE .../auth/devices/:id`, `DELETE .../auth/sessions`). Refresh tokens
   are stored as digests and are audience-scoped, so one leaked from one
   application is not redeemable at another.
 
